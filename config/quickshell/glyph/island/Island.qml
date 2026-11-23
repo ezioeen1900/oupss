@@ -154,6 +154,14 @@ Scope {
         onTriggered: root.beatPhase = (root.beatPhase + 0.12) % (Math.PI * 2)
     }
 
+    // 检测浮动式截图选区窗口（如鼠标中键 Flameshot GUI），在其打开期间让出顶层，避免遮挡截图选区与标注栏
+    readonly property bool screenshotOverlayActive: ToplevelManager.toplevels.values.some(tl => {
+        const id = (tl.appId ?? "").toLowerCase();
+        const t = (tl.title ?? "").toLowerCase();
+        return id.includes("flameshot") || t === "flameshot";
+    })
+    onScreenshotOverlayActiveChanged: if (screenshotOverlayActive && openScreen) close()
+
     Variants {
         model: Quickshell.screens
 
@@ -174,15 +182,15 @@ Scope {
                 WlrLayershell.namespace: "glyph-bar"
             }
 
-            // 2. 灵动岛主体与展开层
+            // 2. 灵动岛主体与展开层（使用 Top 层：普通/最大化窗口之上，Alt+F 独占全屏与 Overlay 截图层之下）
             PanelWindow {
                 id: win
                 screen: scrScope.modelData
-                visible: scrScope.enabledOnScreen
+                visible: scrScope.enabledOnScreen && !root.screenshotOverlayActive
                 anchors { left: true; right: true; top: true; bottom: true }
                 exclusionMode: ExclusionMode.Ignore
                 color: "transparent"
-                WlrLayershell.layer: WlrLayer.Overlay
+                WlrLayershell.layer: WlrLayer.Top
                 WlrLayershell.keyboardFocus: scrScope.isOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
                 WlrLayershell.namespace: "glyph-top-island"
 

@@ -959,28 +959,34 @@ fi
                 }
             }
 
-            // ============ 原位悬浮 Nothing 点阵标注与动作工具栏（框选锁定后紧贴选区弹出） ============
-            Column {
+            // ============ 原位悬浮 Nothing 点阵标注与动作工具栏（固定锚点零跳动布局） ============
+            Item {
                 id: studioBar
                 visible: root.locked
                 z: 18
-                spacing: 8
+                width: root.mode === 3 ? recPill.width : mainPill.width
+                height: 50
                 opacity: (drawArea.pressed && root.live) ? 0.14 : 1.0
                 Behavior on opacity { NumberAnimation { duration: 120 } }
 
+                // y 仅由选区矩形与固定常量计算，绝不随悬停提示或二级子栏显隐发生变化，杜绝上下跳动循环
+                readonly property bool subBelow: y + 104 <= stage.height
                 x: Math.max(14, Math.min(stage.width - width - 14, root.sel.x + root.sel.width - width))
                 y: {
                     const below = root.sel.y + root.sel.height + 12;
-                    if (below + height + 14 <= stage.height) return below;
-                    const above = root.sel.y - height - 12;
-                    if (above >= 14) return above;
-                    return stage.height - height - 18;
+                    if (below + 108 <= stage.height) return below;
+                    const above = root.sel.y - 62;
+                    if (above >= 42) return above;
+                    if (below + 58 <= stage.height) return below;
+                    return stage.height - 112;
                 }
 
-                // 悬停功能提示小胶囊
+                // 悬停功能提示小胶囊（脱离文档流绝对定位，鼠标完全穿透，绝不挤占主栏坐标）
                 Rectangle {
                     visible: root.hoverTip !== ""
-                    anchors.right: mainPill.right
+                    enabled: false
+                    anchors.right: parent.right
+                    y: (!studioBar.subBelow && subPill.visible) ? -82 : (studioBar.y >= 42 ? -32 : (subPill.visible ? 104 : 56))
                     width: tipLb.width + 20
                     height: 24
                     radius: 12
@@ -991,8 +997,10 @@ fi
 
                 // 录屏确认胶囊（mode === 3）
                 Pill {
+                    id: recPill
                     visible: root.mode === 3
-                    anchors.right: parent.right
+                    x: 0
+                    y: 0
                     height: 48
                     pad: 12
                     spacing: 8
@@ -1010,15 +1018,20 @@ fi
                             Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: "#FFFFFF" }
                             Lb { anchors.verticalCenter: parent.verticalCenter; text: "开始录屏 · Enter"; px: 10; color: "#FFFFFF" }
                         }
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: root.startRecord() }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.startRecord()
+                        }
                     }
                 }
 
-                // 截图全功能标注主工具栏（mode !== 3）
+                // 截图全功能标注主工具栏（固定在 y: 0，零位移）
                 Pill {
                     id: mainPill
                     visible: root.mode !== 3
+                    x: 0
+                    y: 0
                     height: 50
                     pad: 8
                     spacing: 3
@@ -1115,7 +1128,7 @@ fi
                         width: doneRow.width + 22
                         height: 36
                         radius: 18
-                        color: doneHov.hovered ? Theme.nothingRed : Theme.fg
+                        color: doneArea.containsMouse ? Theme.nothingRed : Theme.fg
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Row {
                             id: doneRow
@@ -1125,28 +1138,33 @@ fi
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "\u{F012C}"
                                 font.pixelSize: 15
-                                color: doneHov.hovered ? "#FFFFFF" : Theme.ink
+                                color: doneArea.containsMouse ? "#FFFFFF" : Theme.ink
                             }
                             Lb {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "复制"
                                 px: 11
-                                color: doneHov.hovered ? "#FFFFFF" : Theme.ink
+                                color: doneArea.containsMouse ? "#FFFFFF" : Theme.ink
                             }
                         }
-                        HoverHandler {
-                            id: doneHov
+                        MouseArea {
+                            id: doneArea
+                            anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onHoveredChanged: root.hoverTip = hovered ? "复制到剪贴板 · Enter / 双击" : ""
+                            onEntered: root.hoverTip = "复制到剪贴板 · Enter / 双击"
+                            onExited: if (root.hoverTip === "复制到剪贴板 · Enter / 双击") root.hoverTip = ""
+                            onClicked: root.finish("copy")
                         }
-                        TapHandler { onTapped: root.finish("copy") }
                     }
                 }
 
-                // 二级颜色与笔触粗细子栏（选中任意绘图工具时自动展开）
+                // 二级颜色与笔触粗细子栏（独立悬浮定位，不推动主栏 y 坐标）
                 Pill {
+                    id: subPill
                     visible: root.mode !== 3 && root.tool >= 0
                     anchors.right: mainPill.right
+                    y: studioBar.subBelow ? 58 : -50
                     height: 42
                     pad: 12
                     spacing: 6
@@ -1155,6 +1173,7 @@ fi
                     Repeater {
                         model: root.inks
                         Item {
+                            id: inkCell
                             required property color modelData
                             required property int index
                             width: 26
@@ -1163,16 +1182,19 @@ fi
                                 anchors.centerIn: parent
                                 width: 22; height: 22; radius: 11
                                 color: "transparent"
-                                border { width: 1.5; color: index === root.ink ? Theme.fg : "transparent" }
+                                border { width: 1.5; color: inkCell.index === root.ink ? Theme.fg : "transparent" }
                             }
                             Rectangle {
                                 anchors.centerIn: parent
                                 width: 14; height: 14; radius: 7
-                                color: modelData
+                                color: inkCell.modelData
                                 border { width: 1; color: Theme.s3 }
                             }
-                            HoverHandler { cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: root.ink = index }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.ink = inkCell.index
+                            }
                         }
                     }
 
@@ -1182,22 +1204,26 @@ fi
                     Repeater {
                         model: root.sizes
                         Item {
+                            id: szCell
                             required property real modelData
                             required property int index
                             width: 24
                             height: 28
                             Rectangle {
                                 anchors.centerIn: parent
-                                width: 5 + index * 3.2
+                                width: 5 + szCell.index * 3.2
                                 height: width
                                 radius: width / 2
-                                color: index === root.sizeIdx ? Theme.nothingRed : Theme.mute
+                                color: szCell.index === root.sizeIdx ? Theme.nothingRed : Theme.mute
                             }
-                            HoverHandler {
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onHoveredChanged: root.hoverTip = hovered ? "笔触粗细 · 滚轮或 [ ]" : ""
+                                onEntered: root.hoverTip = "笔触粗细 · 滚轮或 [ ]"
+                                onExited: if (root.hoverTip === "笔触粗细 · 滚轮或 [ ]") root.hoverTip = ""
+                                onClicked: root.sizeIdx = szCell.index
                             }
-                            TapHandler { onTapped: root.sizeIdx = index }
                         }
                     }
                 }
@@ -1360,7 +1386,7 @@ fi
         height: 36
         radius: 18
         opacity: dimmed ? 0.35 : 1.0
-        color: active ? Theme.fg : (tbHov.hovered ? (danger ? Theme.nothingRed : Theme.s2) : "transparent")
+        color: active ? Theme.fg : (tbArea.containsMouse ? (danger ? Theme.nothingRed : Theme.s2) : "transparent")
         Behavior on color { ColorAnimation { duration: 110 } }
 
         Icon {
@@ -1369,7 +1395,7 @@ fi
             text: tb.icon
             rotation: tb.iconRot
             font.pixelSize: 16
-            color: tb.active ? Theme.ink : (tbHov.hovered && tb.danger ? "#FFFFFF" : Theme.fg)
+            color: tb.active ? Theme.ink : (tbArea.containsMouse && tb.danger ? "#FFFFFF" : Theme.fg)
         }
 
         Rectangle {
@@ -1394,14 +1420,14 @@ fi
             color: tb.active ? Theme.ink : Theme.fg
         }
 
-        HoverHandler {
-            id: tbHov
+        MouseArea {
+            id: tbArea
+            anchors.fill: parent
+            hoverEnabled: true
             cursorShape: tb.dimmed ? Qt.ArrowCursor : Qt.PointingHandCursor
-            onHoveredChanged: root.hoverTip = hovered ? tb.tip : (root.hoverTip === tb.tip ? "" : root.hoverTip)
-        }
-        TapHandler {
-            enabled: !tb.dimmed
-            onTapped: tb.clicked()
+            onEntered: root.hoverTip = tb.tip
+            onExited: if (root.hoverTip === tb.tip) root.hoverTip = ""
+            onClicked: if (!tb.dimmed) tb.clicked()
         }
     }
 

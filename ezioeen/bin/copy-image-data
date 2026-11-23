@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WL_COPY="/usr/bin/wl-copy"
+WL_PASTE="/usr/bin/wl-paste"
+FFMPEG="/usr/bin/ffmpeg"
+
+f="${1:-}"
+if [ -z "$f" ]; then
+    uri=$("$WL_PASTE" -n -t text/uri-list 2>/dev/null || "$WL_PASTE" -n 2>/dev/null || true)
+    f=$(/usr/bin/python3 -c '
+import sys, urllib.parse
+for line in sys.stdin.read().splitlines():
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    if line.startswith("file://"):
+        line = urllib.parse.unquote(line[7:])
+    print(line)
+    break
+' <<< "$uri")
+fi
+
+[ -n "$f" ] && [ -f "$f" ] || exit 1
+
+case "${f,,}" in
+    *.png)
+        "$WL_COPY" -t image/png < "$f"
+        ;;
+    *.jpg|*.jpeg|*.webp|*.bmp|*.gif|*.tif|*.tiff|*.svg)
+        "$FFMPEG" -y -loglevel error -i "$f" -f image2pipe -vcodec png - | "$WL_COPY" -t image/png
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+
+/usr/bin/notify-send -t 1500 "已复制图片内容" "$(basename "$f")（可直接 Ctrl+V 粘贴到 WPS）" 2>/dev/null || true

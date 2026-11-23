@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export HYPRLAND_INSTANCE_SIGNATURE="${HYPRLAND_INSTANCE_SIGNATURE:-$(ls -dt /run/user/$(id -u)/hypr/*/ 2>/dev/null | head -1 | xargs -r basename)}"
+win=$(hyprctl activewindow -j 2>/dev/null)
+cls=$(printf '%s' "$win" | jq -r '.class // ""')
+pid=$(printf '%s' "$win" | jq -r '.pid // 0')
+
+if [ "$cls" = "com-chaitin-xray-Application" ]; then
+    # SuperXray 的关闭流程会卡在版本检查/线程退出，直接结束进程
+    [ "$pid" -gt 0 ] && kill -TERM "$pid" 2>/dev/null
+    sleep 0.15
+    [ "$pid" -gt 0 ] && kill -KILL "$pid" 2>/dev/null
+    pkill -f '/home/ezioeen/xray/xray' 2>/dev/null
+else
+    hyprctl eval 'hl.dispatch(hl.dsp.window.close())' >/dev/null 2>&1
+fi

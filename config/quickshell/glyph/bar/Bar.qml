@@ -26,7 +26,7 @@ PanelWindow {
     readonly property bool vert: Theme.state.barAt !== "top" // всё, кроме top (и неизвестное), — слева
     anchors { left: true; right: !vert; top: true; bottom: vert }
     implicitWidth: Math.ceil(78 * Theme.s)  // сбоку
-    implicitHeight: Math.ceil(78 * Theme.s) // сверху
+    implicitHeight: Math.ceil(43 * Theme.s) // 顶部精简高度（5px 上边距 + 38px 栏高）
     color: "transparent"
     WlrLayershell.namespace: "glyph-bar"
 
@@ -46,10 +46,10 @@ PanelWindow {
         Rectangle {
             id: pill
             x: 14 // от краёв экрана
-            y: 14
+            y: root.vert ? 14 : 5
             width: root.vert ? 64 : parent.width - 28
-            height: root.vert ? parent.height - 28 : 64
-            radius: Theme.corner(32)
+            height: root.vert ? parent.height - 28 : 38
+            radius: Theme.corner(root.vert ? 32 : 19)
             color: Theme.s1
             border { width: 1; color: Theme.s2 }
 
@@ -58,16 +58,16 @@ PanelWindow {
             // знак: кольцо из точек, центр — красный, пока что-то пишет
             Item {
                 id: mark
-                x: root.vert ? (parent.width - width) / 2 : 18
+                x: root.vert ? (parent.width - width) / 2 : 14
                 y: root.vert ? 18 : (parent.height - height) / 2
-                width: 34
-                height: 34
-                Ring { anchors.fill: parent; n: 16; dot: 3 }
+                width: root.vert ? 34 : 24
+                height: root.vert ? 34 : 24
+                Ring { anchors.fill: parent; n: 16; dot: root.vert ? 3 : 2.2 }
                 Rectangle {
                     anchors.centerIn: parent
-                    width: 9
-                    height: 9
-                    radius: 4.5
+                    width: root.vert ? 9 : 6.5
+                    height: root.vert ? 9 : 6.5
+                    radius: width / 2
                     color: !Sys.live ? Theme.fg : Qt.colorEqual(Theme.accent, Theme.fg) ? Theme.red : Theme.accent // monochrome: акцент = fg
                 }
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.markClicked() }
@@ -127,9 +127,9 @@ PanelWindow {
                 anchors.centerIn: parent
                 TapHandler { onTapped: root.clockClicked() }
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
-                Num { text: Theme.hh(clock.date); font.pixelSize: 30 }
-                Num { visible: !root.vert; text: ":"; font.pixelSize: 30 }
-                Num { text: Qt.formatTime(clock.date, "mm"); font.pixelSize: 30 }
+                Num { text: Theme.hh(clock.date); font.pixelSize: root.vert ? 30 : 21 }
+                Num { visible: !root.vert; text: ":"; font.pixelSize: 21 }
+                Num { text: Qt.formatTime(clock.date, "mm"); font.pixelSize: root.vert ? 30 : 21 }
                 Lb {
                     topPadding: root.vert ? 8 : 0
                     leftPadding: root.vert ? 0 : 12

@@ -6,12 +6,15 @@ import Quickshell.Hyprland
 import "bar"
 import "buds"
 import "cal"
+import "cava"
 import "charms"
 import "clip"
 import "deck"
 import "glyph"
 import "home"
+import "island"
 import "launcher"
+import "overview"
 import "power"
 import "prefs"
 import "quick"
@@ -32,15 +35,25 @@ ShellRoot {
         onPowerRequested: power.open()
         onSettingsRequested: prefs.open()
         onPortalRequested: vpn.requestSignIn()
+        onVpnRequested: vpn.open()
     }
     Power { id: power }
     Prefs { id: prefs; onWallRequested: walls.open() }
     Glyph {}
+    Island {
+        id: topIsland
+        onPowerRequested: power.open()
+        onSettingsRequested: prefs.open()
+        onPortalRequested: vpn.requestSignIn()
+        onVpnRequested: vpn.open()
+    }
+    CavaBar {}
     Buds {}
     Cal { id: cal }
     Clip { id: clip }
     Charms { id: charms }
     Deck { id: deck }
+    Overview { id: overview }
     Shot { id: shot }
     Vpn { id: vpn; wifiNetwork: quick.net }
     Walls { id: walls }
@@ -54,10 +67,10 @@ ShellRoot {
             // бар и дом можно снять с экрана (настройки → display), обои остаются. Здесь, а не в окне: visible от своего
             // screen — петля (окно пересоздаётся, screen меняется)
             Home { screen: s.modelData; visible: Theme.scr(s.modelData.name, "home") }
-            Hot { screen: s.modelData; onTriggered: quick.peek() }
+            Hot { screen: s.modelData; visible: Theme.state.barAt !== "top"; onTriggered: quick.peek() }
             Bar {
                 screen: s.modelData
-                visible: Theme.scr(s.modelData.name, "bar")
+                visible: Theme.state.barAt !== "top" && Theme.scr(s.modelData.name, "bar")
                 onMarkClicked: launcher.toggle()
                 onTrayClicked: quick.toggle()
                 onPowerClicked: power.visible ? power.close() : power.open()
@@ -139,8 +152,9 @@ ShellRoot {
     Shortcut { name: "launcherInterrupt"; description: "Super+<key> — don't open the launcher"; onPressed: shell.interrupted = true }
     // Super+Space (алтарь у demonshot) — deck, дашборд снизу: лаунчер и так на тапе Super
     Shortcut { name: "altar"; description: "deck: bottom dashboard"; onPressed: deck.toggle() }
-    Shortcut { name: "quick"; description: "quick settings"; onPressed: quick.toggle() }
-    Shortcut { name: "ward"; description: "quick settings"; onPressed: quick.toggle() } // Super+N у demonshot — те же тумблеры
+    Shortcut { name: "overview"; description: "workspace & live window overview"; onPressed: overview.toggle() }
+    Shortcut { name: "quick"; description: "quick settings"; onPressed: Theme.state.barAt === "top" ? topIsland.toggleQuick() : quick.toggle() }
+    Shortcut { name: "ward"; description: "quick settings"; onPressed: Theme.state.barAt === "top" ? topIsland.toggleQuick() : quick.toggle() }
     Shortcut { name: "settings"; description: "settings"; onPressed: prefs.toggle() }
     Shortcut { name: "power"; description: "power menu"; onPressed: power.visible ? power.close() : power.open() }
     Shortcut { name: "shot"; description: "screenshot"; onPressed: shot.open() }
@@ -148,6 +162,8 @@ ShellRoot {
     Shortcut { name: "clip"; description: "clipboard"; onPressed: clip.toggle() }
     Shortcut { name: "charms"; description: "emoji, kaomoji, symbols"; onPressed: charms.toggle() }
     Shortcut { name: "wall"; description: "wallpapers"; onPressed: walls.toggle() }
+    Shortcut { name: "memo"; description: "notes & todo memo"; onPressed: Theme.state.barAt === "top" ? topIsland.toggleTab(2) : cal.toggleMemo() }
+    Shortcut { name: "shelf"; description: "file shelf"; onPressed: topIsland.toggleTab(3) }
     Shortcut { name: "game"; description: "game mode"; onPressed: Rules.store.game = !Rules.store.game }
 
     component Shortcut: GlobalShortcut { appid: "shell" }

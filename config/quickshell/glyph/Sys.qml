@@ -162,17 +162,21 @@ Singleton {
         }
     }
 
-    // ---- vpn: clash verge через пункты его трея, как договор в demonshot.
-    // ponytail: подписи английские (language: en в verge); другой язык — поменять строки ----
+    // ---- vpn: clash verge（兼容中英文托盘菜单：系统代理 / TUN 模式）----
     readonly property var verge: SystemTray.items.values.find(i => i.title === "clash-verge" || i.id.includes("clash-verge")) ?? null
     QsMenuOpener { id: vmenu; menu: root.verge?.menu ?? null }
-    readonly property var vpnItems: ["System Proxy", "TUN Mode"]
-    function vpnItem(l) { return vmenu.children.values.find(e => e.text.startsWith(l)) ?? null; }
-    readonly property bool vpn: vpnItems.some(l => vpnItem(l)?.checkState === Qt.Checked)
+    readonly property var vpnSys: ["System Proxy", "系统代理"]
+    readonly property var vpnTun: ["TUN Mode", "TUN 模式"]
+    readonly property var vpnItems: [vpnSys, vpnTun]
+    function vpnItem(ls) {
+        const ps = Array.isArray(ls) ? ls : [ls];
+        return vmenu.children.values.find(e => ps.some(p => e.text.startsWith(p))) ?? null;
+    }
+    readonly property bool vpn: vpnItems.some(ls => vpnItem(ls)?.checkState === Qt.Checked)
     property var queue: []
     function toggleVpn() {
-        if (!verge) return Quickshell.execDetached(["clash-verge"]); // спит — разбудить
-        queue = vpn ? vpnItems.filter(l => vpnItem(l)?.checkState === Qt.Checked) : vpnItems;
+        if (!verge) return Quickshell.execDetached(["clash-verge"]);
+        queue = vpn ? vpnItems.filter(ls => vpnItem(ls)?.checkState === Qt.Checked) : [vpnSys];
         presser.start();
     }
     // verge пересобирает меню после каждого нажатия — по одному

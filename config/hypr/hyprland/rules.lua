@@ -4,7 +4,8 @@ local vars = require("variables")
 ---- Window rules ----
 ----------------------
 
-hl.window_rule({ match = { fullscreen = false }, opacity = vars.windowOpacity .. " override" })
+-- 已禁用全局 1.0 override，以便 user.lua 的 inactive_opacity 生效
+-- hl.window_rule({ match = { fullscreen = false }, opacity = vars.windowOpacity .. " override" })
 
 -- приложения (kitty) сами просят maximize при открытии — игнорируем, тайлинг решает сам
 hl.window_rule({ match = { class = ".*" }, suppress_event = "maximize" })
@@ -36,7 +37,7 @@ hl.window_rule({ match = { tag = "float" }, float = true })
 hl.window_rule({
     match = {
         class =
-        "kitty|equibop|org.quickshell|com.t3tools.T3Code|imv|swappy|krita|gimp|inkscape|darktable|resolve|kdenlive|shotcut|blender|godot|(steam_app_(default|[0-9]+))|gamescope",
+        "equibop|org.quickshell|com.t3tools.T3Code|imv|swappy|krita|gimp|inkscape|darktable|resolve|kdenlive|shotcut|blender|godot|(steam_app_(default|[0-9]+))|gamescope",
     },
     tag   = "+opaque_app",
 })
@@ -132,4 +133,4 @@ hl.layer_rule({ match = { namespace = "demonshot-.*" }, no_anim = true })
 -- glyph: полосы-OSD, остров, быстрые настройки и свои модули рисуют появление сами — компоновщик не мешает (и не тормозит OSD);
 -- меню питания своей анимации нет — мягкий fade
 hl.layer_rule({ match = { namespace = "glyph-power" }, animation = "fade" })
-hl.layer_rule({ match = { namespace = "glyph-(launcher|edge|island|buds|quick|home|bar|caffeine|shot|clip|charms|vpn|deck|prefs|hot|cal|wall|back)" }, no_anim = true })
+hl.layer_rule({ match = { namespace = "glyph-(launcher|edge|island|top-island|overview|buds|quick|home|bar|caffeine|shot|clip|charms|vpn|deck|prefs|hot|cal|wall|back|cava)" }, no_anim = true })

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Clash Verge Rev：禁用 WebKit DMABUF 渲染，避免界面黑块
+export WEBKIT_DISABLE_DMABUF_RENDERER=1
+exec /usr/bin/clash-verge "$@"

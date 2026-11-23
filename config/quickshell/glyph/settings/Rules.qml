@@ -246,7 +246,7 @@ Singleton {
     }
     // ponytail: только вкл/выкл; slam/snap — переопределять кривые из animations.lua
     function motion() { hypr(`hl.config({ animations = { enabled = ${moving} } })`); }
-    readonly property var switches: [["alt+shift", "grp:alt_shift_toggle"], ["caps", "grp:caps_toggle"], ["ctrl+shift", "grp:ctrl_shift_toggle"]]
+    readonly property var switches: [["none", ""], ["alt+shift", "grp:alt_shift_toggle"], ["caps", "grp:caps_toggle"], ["ctrl+shift", "grp:ctrl_shift_toggle"]]
     function input() {
         const s = store;
         hypr(`hl.config({ input = { kb_options = "${switches[s.kbSwitch]?.[1] ?? switches[0][1]}", repeat_delay = ${s.repeatDelay}, repeat_rate = ${s.repeatRate}, `

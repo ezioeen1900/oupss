@@ -1,5 +1,4 @@
-# личное: свои бинды hypr и фото наушников
-config/hypr/user.lua
+# личное: фото наушников (user.lua 在 ezioeen 分支纳入版本控制以便一键复刻)
 config/quickshell/glyph/buds/*.png
 # fontconfig пишет его в config/fonts после fc-cache (install.sh): у каждого свой
 config/fonts/.uuid

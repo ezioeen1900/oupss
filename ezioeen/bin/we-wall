@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKSHOP_DIR="$HOME/.local/share/Steam/steamapps/workshop/content/431960"
+STATE_FILE="$HOME/.cache/we-wall-state.json"
+SCREEN="${WE_SCREEN:-eDP-1}"
+FPS="60"
+SILENT_FLAG="--silent"
+
+usage() {
+  cat <<'EOF'
+用法:
+  we-wall list                  列出已同步的 Steam 创意工坊壁纸 (ID / 类型 / 名称)
+  we-wall <壁纸ID> [--audio] [--fps 60]  在 Hyprland 底层启动该 Wallpaper Engine 壁纸
+  we-wall restore               按上次记录自动恢复动态桌面或普通壁纸（供开机自启）
+  we-wall stop                  停止 Wallpaper Engine 并恢复 awww 静态/动图壁纸服务
+EOF
+}
+
+if [[ $# -lt 1 || "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$1" == "list" ]]; then
+  python3 - "$WORKSHOP_DIR" <<'PY'
+import json, os, sys
+wdir = sys.argv[1]
+if not os.path.isdir(wdir):
+    print("未找到创意工坊目录:", wdir)
+    sys.exit(1)
+items = []
+for name in sorted(os.listdir(wdir)):
+    pj = os.path.join(wdir, name, "project.json")
+    if os.path.isfile(pj):
+        try:
+            data = json.load(open(pj, encoding="utf-8-sig"))
+            items.append((name, str(data.get("type", "?")).lower(), str(data.get("title", name))))
+        except Exception:
+            items.append((name, "?", name))
+print(f"共找到 {len(items)} 个 Steam 创意工坊壁纸：\n")
+print(f"{'ID':<14} {'类型':<8} 标题")
+print("-" * 60)
+for wid, wtype, title in items:
+    print(f"{wid:<14} {wtype:<8} {title}")
+PY
+  exit 0
+fi
+
+if [[ "$1" == "restore" ]]; then
+  sleep 1
+  if [[ -f "$STATE_FILE" ]]; then
+    read -r SAVED_ID SAVED_FPS SAVED_AUDIO < <(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+    print(d.get("active_id", "") or "-", int(d.get("fps", 60)), "1" if d.get("audio") else "0")
+except Exception:
+    print("- 60 0")
+' "$STATE_FILE")
+    if [[ "$SAVED_ID" != "-" && -n "$SAVED_ID" ]]; then
+      ARGS=("$SAVED_ID" --fps "$SAVED_FPS")
+      [[ "$SAVED_AUDIO" == "1" ]] && ARGS+=(--audio)
+      exec "$0" "${ARGS[@]}"
+    fi
+  fi
+  if systemctl --user list-unit-files awww-daemon.service >/dev/null 2>&1; then
+    systemctl --user start awww-daemon.service 2>/dev/null || true
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "stop" ]]; then
+  pkill -f 'linux-wallpaperengine' 2>/dev/null || true
+  python3 -c '
+import json, os, sys
+p = sys.argv[1]
+try: d = json.load(open(p, encoding="utf-8"))
+except Exception: d = {}
+d["active_id"] = ""
+os.makedirs(os.path.dirname(p), exist_ok=True)
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+' "$STATE_FILE" 2>/dev/null || true
+  if systemctl --user list-unit-files awww-daemon.service >/dev/null 2>&1; then
+    systemctl --user start awww-daemon.service 2>/dev/null || true
+  elif ! awww query >/dev/null 2>&1; then
+    setsid awww-daemon >/tmp/awww-daemon.log 2>&1 </dev/null &
+  fi
+  echo "已停止 linux-wallpaperengine 并恢复 awww-daemon。"
+  exit 0
+fi
+
+WALL_ID="$1"
+shift
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --audio) SILENT_FLAG=""; shift ;;
+    --fps)   FPS="${2:-60}"; shift 2 ;;
+    --screen) SCREEN="${2:-eDP-1}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+# 停掉冲突的壁纸进程（用 systemctl --user stop 防止 awww-daemon.service 自动复活盖住壁纸）
+pkill -f 'linux-wallpaperengine' 2>/dev/null || true
+systemctl --user stop awww-daemon.service 2>/dev/null || true
+pkill -x awww-daemon 2>/dev/null || true
+pkill -f -9 mpvpaper 2>/dev/null || true
+sleep 0.15
+
+# 启动 linux-wallpaperengine（锚定在 background 层，不会遮挡桌面小组件）
+CMD=(/usr/bin/linux-wallpaperengine --layer background --screen-root "$SCREEN" --scaling fill --fps "$FPS" --hwdec auto --fullscreen-pause-only-active)
+[[ -n "$SILENT_FLAG" ]] && CMD+=("$SILENT_FLAG")
+CMD+=(--bg "$WALL_ID")
+
+setsid "${CMD[@]}" >/tmp/linux-wallpaperengine.log 2>&1 </dev/null &
+sleep 0.4
+
+# 同步小组件配色（取预览图）
+PREVIEW=""
+for cand in preview.jpg preview.png preview.gif; do
+  if [[ -f "$WORKSHOP_DIR/$WALL_ID/$cand" ]]; then
+    PREVIEW="$WORKSHOP_DIR/$WALL_ID/$cand"
+    break
+  fi
+done
+if [[ -n "$PREVIEW" && -x "$HOME/.local/bin/qs-wall-colors" ]]; then
+  "$HOME/.local/bin/qs-wall-colors" "$PREVIEW" >/dev/null 2>&1 &
+fi
+
+if pgrep -f 'linux-wallpaperengine' >/dev/null; then
+  python3 -c '
+import json, os, sys
+p, wid, fps, audio = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4] == "1"
+os.makedirs(os.path.dirname(p), exist_ok=True)
+json.dump({"active_id": wid, "fps": fps, "audio": audio}, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+' "$STATE_FILE" "$WALL_ID" "$FPS" "$([[ -z "$SILENT_FLAG" ]] && echo 1 || echo 0)" 2>/dev/null || true
+  echo "✅ 已启动壁纸 $WALL_ID（屏幕: $SCREEN, ${FPS}fps, 层级: background）"
+  echo "   日志: /tmp/linux-wallpaperengine.log"
+else
+  echo "❌ 启动失败，请查看 /tmp/linux-wallpaperengine.log:"
+  tail -n 20 /tmp/linux-wallpaperengine.log 2>/dev/null || true
+  exit 1
+fi

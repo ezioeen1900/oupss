@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# 根据 Clash Verge 是否运行，自动开启/关闭 GNOME 系统代理
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+PIDFILE=/tmp/clash-proxy-watch.pid
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+    exit 0
+fi
+echo $$ > "$PIDFILE"
+
+enable_proxy() {
+    gsettings set org.gnome.system.proxy mode 'manual' 2>/dev/null
+    for proto in http https ftp socks; do
+        gsettings set "org.gnome.system.proxy.$proto" host '127.0.0.1' 2>/dev/null
+        gsettings set "org.gnome.system.proxy.$proto" port 7897 2>/dev/null
+    done
+    gsettings set org.gnome.system.proxy ignore-hosts "['localhost', '127.0.0.0/8', '::1', '192.168.0.0/16', '10.0.0.0/8']" 2>/dev/null
+}
+
+disable_proxy() {
+    gsettings set org.gnome.system.proxy mode 'none' 2>/dev/null
+}
+
+while true; do
+    if pgrep -x clash-verge >/dev/null 2>&1; then
+        enable_proxy
+    else
+        disable_proxy
+    fi
+    sleep 2
+done

@@ -1,0 +1,123 @@
+# glyph — Nothing OS / Glyph Plymouth boot splash (Welcome Ezioeen)
+
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
+
+W = Window.GetWidth();
+H = Window.GetHeight();
+OX = Window.GetX();
+OY = Window.GetY();
+s = H / 1080.0;
+CX = OX + W / 2;
+CY = OY + H * 0.45;
+PI = 3.14159265;
+
+fun load(name) {
+    local.img = Image(name);
+    if (global.s != 1)
+        img = img.Scale(Math.Int(img.GetWidth() * global.s + 0.5), Math.Int(img.GetHeight() * global.s + 0.5));
+    return img;
+}
+
+fun place_center(img, cx, cy, z) {
+    local.sp = Sprite(img);
+    sp.SetPosition(Math.Int(cx - img.GetWidth() / 2), Math.Int(cy - img.GetHeight() / 2), z);
+    return sp;
+}
+
+# Background grid
+bg_sp = Sprite(Image("bg.png").Scale(W, H));
+bg_sp.SetPosition(OX, OY, -100);
+
+# Top-left corner badge
+corner_img = load("corner.png");
+corner_sp = Sprite(corner_img);
+corner_sp.SetPosition(Math.Int(OX + 52 * s), Math.Int(OY + 38 * s), 5);
+corner_sp.SetOpacity(0.85);
+
+# Outer 48-tick dial
+dial_dim_sp = place_center(load("dial_dim.png"), CX, CY, 8);
+dial_lit_sp = place_center(load("dial_lit.png"), CX, CY, 9);
+dial_lit_sp.SetOpacity(0.0);
+
+# 16-dot Nothing Glyph rotating ring
+dot_img = load("ring_dot.png");
+R_ring = 80.0 * s;
+for (i = 0; i < 16; i++) {
+    ang = -PI / 2.0 + (i / 16.0) * PI * 2.0;
+    ring_ang[i] = ang;
+    dx = CX + Math.Cos(ang) * R_ring;
+    dy = CY + Math.Sin(ang) * R_ring;
+    ring_sp[i] = place_center(dot_img, dx, dy, 12);
+    ring_sp[i].SetOpacity(0.18);
+}
+
+# Central Nothing Red breathing core
+core_sp = place_center(load("core_red.png"), CX, CY, 15);
+
+# Wordmark: WELCOME EZIOEEN
+wm_sp = place_center(load("wordmark.png"), CX, CY + 178 * s, 12);
+wm_sp.SetOpacity(0.0);
+
+# 24-dot segmented progress bar
+p_dim = load("prog_dim.png");
+p_lit = load("prog_lit.png");
+p_red = load("prog_red.png");
+BARS = 24;
+SPAN = 340.0 * s;
+BX0 = CX - SPAN / 2.0;
+BY = CY + 234 * s;
+for (i = 0; i < BARS; i++) {
+    px = BX0 + (i / (BARS - 1.0)) * SPAN;
+    prog_sp[i] = place_center(p_dim, px, BY, 12);
+}
+
+tick = 0.0;
+boot_prog = 0.0;
+
+fun progress_cb(duration, progress) {
+    global.boot_prog = progress;
+}
+Plymouth.SetBootProgressFunction(progress_cb);
+
+fun refresh_cb() {
+    global.tick = global.tick + 0.02;
+    t = global.tick;
+
+    # Smooth fade-in of dial & wordmark
+    fade = t * 1.4;
+    if (fade > 1.0) fade = 1.0;
+    dial_lit_sp.SetOpacity(fade);
+    wm_sp.SetOpacity(fade);
+
+    # Rotating 16-dot wave
+    rot = t * 2.6;
+    for (i = 0; i < 16; i++) {
+        w = 0.5 + 0.5 * Math.Cos(ring_ang[i] - rot);
+        w3 = w * w * w;
+        op = 0.14 + 0.86 * w3;
+        ring_sp[i].SetOpacity(op);
+    }
+
+    # Central red core pulse
+    pulse = 0.72 + 0.28 * Math.Sin(t * 4.2);
+    core_sp.SetOpacity(pulse);
+
+    # Progress bar (combine Plymouth progress with smooth minimum ramp so fast boots look great)
+    p = global.boot_prog;
+    ramp = t / 3.2;
+    if (ramp > 0.92) ramp = 0.92;
+    if (p < ramp) p = ramp;
+    if (p > 1.0) p = 1.0;
+
+    lit_n = Math.Int(p * BARS + 0.5);
+    for (i = 0; i < BARS; i++) {
+        if (i == lit_n - 1 && lit_n < BARS)
+            prog_sp[i].SetImage(p_red);
+        else if (i < lit_n)
+            prog_sp[i].SetImage(p_lit);
+        else
+            prog_sp[i].SetImage(p_dim);
+    }
+}
+Plymouth.SetRefreshFunction(refresh_cb);

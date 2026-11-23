@@ -13,32 +13,37 @@ import qs.components
 PanelWindow {
     id: root
 
-    // ---- verge: трей ----
+    // ---- verge: 托盘菜单（兼容中英文 Clash Verge）----
     readonly property var verge: Sys.verge
-    // ponytail: пункты трея ищем по английским подписям (language: en в verge); другой язык — поменять строки тут
-    function child(op, pre) { return op.children.values.find(e => e.text.startsWith(pre)) ?? null; }
+    readonly property var kSys: ["System Proxy", "系统代理"]
+    readonly property var kTun: ["TUN Mode", "TUN 模式"]
+    readonly property var modeMatch: [["Rule", "规则"], ["Global", "全局"], ["Direct", "直连"]]
+    function child(op, pre) {
+        const ps = Array.isArray(pre) ? pre : [pre];
+        return op.children.values.find(e => ps.some(p => e.text.startsWith(p))) ?? null;
+    }
     function checked(op, pre) { return child(op, pre)?.checkState === Qt.Checked; }
     QsMenuOpener { id: tray; menu: root.verge?.menu ?? null }
-    QsMenuOpener { id: modes; menu: root.child(tray, "Outbound Modes") }
-    QsMenuOpener { id: proxies; menu: root.child(tray, "Proxies") }
+    QsMenuOpener { id: modes; menu: root.child(tray, ["Outbound Modes", "出站模式"]) }
+    QsMenuOpener { id: proxies; menu: root.child(tray, ["Proxies", "代理"]) }
     QsMenuOpener { id: grp; menu: proxies.children.values.find(e => e.hasChildren) ?? null }
 
-    readonly property bool sys: checked(tray, "System Proxy")
-    readonly property bool tun: checked(tray, "TUN Mode")
+    readonly property bool sys: checked(tray, kSys)
+    readonly property bool tun: checked(tray, kTun)
     readonly property var modeNames: ["Rule", "Global", "Direct"]
-    readonly property int mode: modeNames.findIndex(m => checked(modes, m))
+    readonly property int mode: modeMatch.findIndex(m => checked(modes, m))
     readonly property string group: (proxies.children.values.find(e => e.hasChildren)?.text ?? "proxy").toLowerCase()
 
-    // узел из пункта трея «TCP PL 🇵🇱⚡️-NODE🐸   | 48ms»: код страны из флага, имя без транспорта и эмодзи, пинг
+    // 节点名解析（保留中文节点名称，如「🇭🇰 香港 02 | 33ms」）
     readonly property var transports: ["tcp", "xhttp", "ws", "grpc", "h2", "http", "httpupgrade", "splithttp", "quic", "kcp", "reality", "hy2", "tuic"]
     readonly property var builtin: ({ DIRECT: ["Direct", "no proxy"], REJECT: ["Reject", "blocked"] })
     function way(e) {
         const m = /^(.*?)\s*\|\s*(\S*?)\s*ms$/.exec(e.text), label = (m?.[1] ?? e.text).trim(), b = builtin[label];
         const flag = [...label].map(c => c.codePointAt(0)).filter(c => c >= 0x1F1E6 && c <= 0x1F1FF).map(c => String.fromCharCode(c - 0x1F1E6 + 65)).join("");
-        const words = label.replace(/[^\x20-\x7E]/g, " ").split(/[\s\-_|·]+/).filter(Boolean);
+        const words = label.replace(/[^\x20-\x7E\u4e00-\u9fff]/g, " ").split(/[\s\-_|·]+/).filter(Boolean);
         const cc = b ? "—" : flag || words.find(w => /^[A-Z]{2}$/.test(w)) || "··";
         const via = words.find(w => transports.includes(w.toLowerCase()))?.toLowerCase();
-        const name = words.filter(w => w !== cc && !transports.includes(w.toLowerCase())).map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
+        const name = words.filter(w => w !== cc && !transports.includes(w.toLowerCase())).map(w => /^[a-zA-Z]/.test(w) ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w).join(" ");
         return {
             entry: e, cc, on: e.checkState === Qt.Checked,
             name: b ? b[0] : name || label,
@@ -48,10 +53,9 @@ PanelWindow {
     }
     readonly property var ways: grp.children.values.filter(e => !e.isSeparator && e.buttonType !== QsMenuButtonType.None).map(e => way(e))
 
-    // нажать пункт трея; несколько — по очереди: verge после каждого пересобирает меню
     property var queue: []
     function press(label) {
-        queue = queue.concat([label]);
+        queue = [...queue, label];
         if (!presser.running) presser.start();
     }
     Timer {
@@ -67,26 +71,26 @@ PanelWindow {
         }
     }
     function go(i) { const w = ways[i]; if (w && !w.on) w.entry.triggered(); }
-    function route(i) { child(modes, modeNames[i])?.triggered(); }
+    function route(i) { child(modes, modeMatch[i])?.triggered(); }
     property bool pinging: false
-    function ping() { child(grp, "Test Latency")?.triggered(); pinging = true; pingT.restart(); }
+    function ping() { child(grp, ["Test Latency", "延迟测试", "测试延迟"])?.triggered(); pinging = true; pingT.restart(); }
     Timer { id: pingT; interval: 2500; onTriggered: root.pinging = false }
 
-    // ---- туннель: System proxy или TUN. Выключил — гаснут оба, включил — вернулись те, что были ----
+    // ---- 隧道开关：默认开启系统代理，关闭时熄灭所有已勾选项 ----
     readonly property bool live: sys || tun
-    property var kept: ["System Proxy", "TUN Mode"] // что вернуть при включении
-    property int want: -1                           // пока verge не догнал: 1 — включаем, 0 — выключаем
+    property var kept: [kSys]
+    property int want: -1
     readonly property bool connected: want >= 0 ? want === 1 : live
     onLiveChanged: { want = -1; wall(); }
-    Timer { id: wantT; interval: 5000; onTriggered: root.want = -1 } // verge промолчал — показываем как есть
+    Timer { id: wantT; interval: 5000; onTriggered: root.want = -1 }
     function flip() {
-        if (!verge) return Quickshell.execDetached(["clash-verge"]); // спит — разбудить
+        if (!verge) return Quickshell.execDetached(["clash-verge"]);
         if (connected) {
-            kept = [sys && "System Proxy", tun && "TUN Mode"].filter(Boolean);
+            kept = [sys && kSys, tun && kTun].filter(Boolean);
             kept.forEach(l => press(l));
             want = 0;
         } else {
-            (kept.length ? kept : ["System Proxy", "TUN Mode"]).forEach(l => press(l));
+            (kept.length ? kept : [kSys]).forEach(l => press(l));
             want = 1;
         }
         wantT.restart();
@@ -103,7 +107,7 @@ PanelWindow {
     // Туннель снят из-за портала — вернуть, когда сеть пустит. Флаг в glyph.json: verge помнит, что его выключили, и после
     // перезагрузки посреди портала туннель так и остался бы выключенным. Вернуть — когда меню verge пришло (live и flip() настоящие)
     readonly property bool portal: Theme.state.vpnPortal
-    readonly property bool ready: child(tray, "System Proxy") !== null
+    readonly property bool ready: child(tray, kSys) !== null
     onReadyChanged: wall()
     property bool seen: false
     property bool opened: false
@@ -391,8 +395,8 @@ PanelWindow {
 
                 Row {
                     spacing: 12
-                    Pill { on: root.sys; icon: "\u{F059F}"; name: "System"; sub: "proxy"; onClicked: root.press("System Proxy") }
-                    Pill { on: root.tun; icon: "\u{F0A60}"; name: "TUN"; sub: "tunnel"; onClicked: root.press("TUN Mode") }
+                    Pill { on: root.sys; icon: "\u{F059F}"; name: "System"; sub: "proxy"; onClicked: root.press(root.kSys) }
+                    Pill { on: root.tun; icon: "\u{F0A60}"; name: "TUN"; sub: "tunnel"; onClicked: root.press(root.kTun) }
                 }
 
                 // режим: белая заливка перетекает к выбранному чипу

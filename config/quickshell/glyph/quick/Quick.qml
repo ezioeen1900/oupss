@@ -8,6 +8,7 @@ import qs
 import qs.components
 import qs.settings
 import qs.services
+import "../island"
 
 // быстрые настройки: Super+A или клик по трею. Панель 470 у правого края, прижата к низу, выезжает справа: часы, пилюли Wi-Fi/Bluetooth,
 // круглые плитки, слайдеры (залитое — белая пилюля, пустое — точки), мини-плеер, уведомления. Окна за ней гаснут на 35%
@@ -17,7 +18,10 @@ PanelWindow {
     signal powerRequested
     signal settingsRequested
     signal portalRequested
+    signal vpnRequested
+    signal islandTabsRequested
 
+    property real restWidth: 264
     property bool open: false
     // peeked — открыта наведением на правый край (Hot): клавиатуру не забирает, курсор ушёл с панели — закрывается сама
     property bool peeked: false
@@ -64,37 +68,73 @@ PanelWindow {
     Stage {
         id: stage
         HoverHandler { id: seen }
-        // зона наведения: панель и полоса до края экрана — курсор у самого края не считается «ушёл», иначе она закрылась бы
-        // и тут же открылась. Панель внутри зоны, а не соседом: HoverHandler кнопки (клетки режимов, строки Picker) гасит
-        // наведение соседа под собой, а предка — нет
+        readonly property bool fromIsland: Theme.state.barAt === "top"
+
+        // 当顶栏为灵动岛模式时，控制中心直接从顶部灵动岛胶囊带液态内凹耳朵丝滑向下展开；否则保持右下角弹出
         Item {
-            anchors { right: parent.right; bottom: parent.bottom }
-            width: panel.width + panel.anchors.rightMargin
-            height: panel.height + 14
+            x: stage.fromIsland ? (parent.width - width) / 2 : (parent.width - width)
+            y: stage.fromIsland ? 0 : (parent.height - height)
+            width: stage.fromIsland ? panel.width : (panel.width + 14)
+            height: stage.fromIsland ? panel.height : (panel.height + 14)
             HoverHandler { id: keep }
-            Rectangle {
+
+            Item {
                 id: panel
-                anchors { right: parent.right; rightMargin: 14 - 24 * (1 - root.t); bottom: parent.bottom; bottomMargin: 14 }
-                width: 470
-                height: col.height + 44
-                opacity: root.t
-                radius: Theme.corner(36)
-                color: Theme.s1
-                border { width: 1; color: Theme.s2 }
+                readonly property real fullW: 470
+                readonly property real fullH: col.height + 44
+                readonly property real baseW: Math.max(250, root.restWidth)
+                x: stage.fromIsland ? 0 : (-24 * (1 - root.t))
+                y: stage.fromIsland ? (4 * (1 - root.t)) : 0
+                width: stage.fromIsland ? (baseW + (fullW - baseW) * root.t) : fullW
+                height: stage.fromIsland ? (32 + (fullH - 32) * root.t) : fullH
+                // 收起末段 (t: 0.25 → 0) 平滑渐隐，无缝露出底层同尺寸灵动岛文字，消除黑条遮挡跳变
+                opacity: stage.fromIsland ? Math.min(1, root.t / 0.25) : root.t
                 focus: true
                 Keys.onEscapePressed: root.close()
                 MouseArea { anchors.fill: parent } // клик по панели не закрывает
 
-                Column {
-                    id: col
-                    x: 22
-                    y: 22
-                    width: parent.width - 44
-                    spacing: 16
+                // 左栏模式原有圆角卡片底板
+                Rectangle {
+                    visible: !stage.fromIsland
+                    anchors.fill: parent
+                    radius: Theme.corner(36)
+                    color: Theme.s1
+                    border { width: 1; color: Theme.s2 }
+                }
+
+                // 灵动岛模式：纯黑贴顶液态内凹耳朵轮廓，与灵动岛 1:1 丝滑变形
+                IslandChrome {
+                    visible: stage.fromIsland
+                    earSize: 22 * root.t
+                    x: -earSize
+                    y: 0
+                    width: panel.width + earSize * 2
+                    height: panel.height
+                    topRadius: 16
+                    bottomRadius: 16 + (Theme.corner(32) - 16) * root.t
+                    fillColor: "#000000"
+                    borderColor: Theme.s2
+                }
+
+                Item {
+                    anchors.fill: parent
+                    clip: true
+
+                    Column {
+                        id: col
+                        x: (panel.width - width) / 2
+                        y: 22
+                        width: panel.fullW - 44
+                        spacing: 16
+                        opacity: stage.fromIsland ? Math.max(0, (root.t - 0.22) / 0.78) : 1
 
                     Item {
                         width: parent.width
                         height: 54
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: { root.close(); root.islandTabsRequested(); }
+                        }
                         Row {
                             x: 6
                             anchors.verticalCenter: parent.verticalCenter
@@ -219,7 +259,7 @@ PanelWindow {
                         Tile { icon: "\u{F0176}"; name: "caffeine"; on: Sys.caffeine; onClicked: Sys.caffeine = !Sys.caffeine }
                         Tile { icon: on ? "\u{F036C}" : "\u{F036D}"; name: "mic"; on: Sys.micOn; onClicked: Sys.toggleMic() }
                         Tile { icon: "\u{F044A}"; name: "record"; on: Sys.rec; picked: root.pick === "rec"; onClicked: { root.close(); Sys.toggleRec(); } onMenu: root.pick = picked ? "" : "rec" }
-                        Tile { icon: "\u{F0483}"; name: "vpn"; on: Sys.vpn; onClicked: Sys.toggleVpn() }
+                        Tile { icon: "\u{F0483}"; name: "vpn"; on: Sys.vpn; onClicked: Sys.toggleVpn(); onMenu: { root.close(); root.vpnRequested(); } }
                         Tile { icon: "\u{F050E}"; name: "dark"; on: !Theme.light; onClicked: Theme.setLight(!Theme.light) }
                     }
 
@@ -401,6 +441,7 @@ PanelWindow {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

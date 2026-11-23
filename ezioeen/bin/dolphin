@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Force system Dolphin (avoid Nix dolphin), use KDE platform theme for Breeze Dark.
+export QT_QPA_PLATFORMTHEME=kde
+exec /usr/bin/dolphin "$@"

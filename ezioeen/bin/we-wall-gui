@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+"""Native GTK4 + Libadwaita thumbnail browser for Steam Wallpaper Engine (linux-wallpaperengine)."""
+
+import concurrent.futures
+import json
+import os
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
+
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
+
+WORKSHOP_DIR = os.path.expanduser("~/.local/share/Steam/steamapps/workshop/content/431960")
+STATE_FILE = os.path.expanduser("~/.cache/we-wall-state.json")
+WE_WALL_BIN = os.path.expanduser("~/.local/bin/we-wall")
+
+THUMB_W = 240
+THUMB_H = 135
+
+CSS = """
+window {
+    background-color: #121215;
+}
+.wp-card {
+    background-color: #1c1c21;
+    border-radius: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.06);
+    padding: 8px;
+    transition: border-color 140ms ease, background-color 140ms ease;
+}
+.wp-card:hover {
+    background-color: #25252c;
+    border-color: rgba(140, 180, 255, 0.45);
+}
+.wp-card.active {
+    background-color: #1f2838;
+    border-color: #60a5fa;
+}
+.wp-thumb-frame {
+    border-radius: 8px;
+    background-color: #101014;
+}
+.wp-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f1f3f5;
+}
+.wp-meta {
+    font-size: 11px;
+    color: #9aa0a6;
+}
+.badge-scene {
+    background-color: rgba(96, 165, 250, 0.22);
+    color: #93c5fd;
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.badge-video {
+    background-color: rgba(52, 211, 153, 0.22);
+    color: #6ee7b7;
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.badge-web {
+    background-color: rgba(251, 191, 36, 0.22);
+    color: #fcd34d;
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.filter-btn {
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12px;
+}
+"""
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"active_id": "", "fps": 60, "audio": False}
+
+
+def save_state(state: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def scan_wallpapers() -> list[dict]:
+    items: list[dict] = []
+    if not os.path.isdir(WORKSHOP_DIR):
+        return items
+    for name in sorted(os.listdir(WORKSHOP_DIR)):
+        folder = os.path.join(WORKSHOP_DIR, name)
+        pj = os.path.join(folder, "project.json")
+        if not os.path.isfile(pj):
+            continue
+        title = name
+        wtype = "other"
+        preview_rel = ""
+        try:
+            with open(pj, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            title = str(data.get("title") or name).strip()
+            wtype = str(data.get("type") or "other").strip().lower()
+            preview_rel = str(data.get("preview") or "").strip()
+        except Exception:
+            pass
+
+        preview_path = ""
+        candidates = []
+        if preview_rel:
+            candidates.append(os.path.join(folder, preview_rel))
+        candidates.extend(
+            os.path.join(folder, fn)
+            for fn in ("preview.jpg", "preview.png", "preview.gif", "preview.jpeg", "preview.webp")
+        )
+        for cand in candidates:
+            if os.path.isfile(cand):
+                preview_path = cand
+                break
+
+        items.append(
+            {
+                "id": name,
+                "title": title,
+                "type": wtype,
+                "preview": preview_path,
+                "search_key": f"{title.lower()} {name.lower()} {wtype}",
+            }
+        )
+    return items
+
+
+class WallpaperCard(Gtk.Box):
+    def __init__(self, item: dict, on_activate):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.item = item
+        self._on_activate = on_activate
+        self.add_css_class("wp-card")
+        self.set_size_request(THUMB_W + 16, THUMB_H + 64)
+
+        frame = Gtk.Box()
+        frame.add_css_class("wp-thumb-frame")
+        frame.set_size_request(THUMB_W, THUMB_H)
+        frame.set_overflow(Gtk.Overflow.HIDDEN)
+
+        self.picture = Gtk.Picture()
+        self.picture.set_size_request(THUMB_W, THUMB_H)
+        self.picture.set_hexpand(True)
+        self.picture.set_content_fit(Gtk.ContentFit.COVER)
+        self.picture.set_can_shrink(True)
+        frame.append(self.picture)
+        self.append(frame)
+
+        title_lbl = Gtk.Label(label=item["title"])
+        title_lbl.add_css_class("wp-title")
+        title_lbl.set_xalign(0.0)
+        title_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        title_lbl.set_max_width_chars(24)
+        self.append(title_lbl)
+
+        meta_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        badge = Gtk.Label(label=item["type"].upper())
+        if item["type"] == "scene":
+            badge.add_css_class("badge-scene")
+        elif item["type"] == "video":
+            badge.add_css_class("badge-video")
+        else:
+            badge.add_css_class("badge-web")
+        meta_row.append(badge)
+
+        id_lbl = Gtk.Label(label=item["id"])
+        id_lbl.add_css_class("wp-meta")
+        id_lbl.set_xalign(0.0)
+        id_lbl.set_hexpand(True)
+        meta_row.append(id_lbl)
+        self.append(meta_row)
+
+        click = Gtk.GestureClick.new()
+        click.connect("released", self._handle_click)
+        self.add_controller(click)
+        self.set_cursor_from_name("pointer")
+
+    def _handle_click(self, _gesture, _n_press, _x, _y):
+        self._on_activate(self.item)
+
+    def set_texture(self, texture: Gdk.Texture | None):
+        if texture is not None:
+            self.picture.set_paintable(texture)
+
+    def set_active(self, active: bool):
+        if active:
+            self.add_css_class("active")
+        else:
+            self.remove_css_class("active")
+
+
+class WeWallWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Wallpaper Engine 壁纸库")
+        self.set_default_size(1160, 740)
+
+        self.state = load_state()
+        self.active_id: str = str(self.state.get("active_id", ""))
+        self.filter_type: str = "all"
+        self.search_query: str = ""
+        self.cards_by_id: dict[str, WallpaperCard] = {}
+        self.children_cards: list[tuple[Gtk.FlowBoxChild, WallpaperCard]] = []
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
+
+        root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.toast_overlay.set_child(root_box)
+
+        # HeaderBar
+        header = Adw.HeaderBar()
+        root_box.append(header)
+
+        self.search_entry = Gtk.SearchEntry()
+        self.search_entry.set_placeholder_text("搜索壁纸名称或 ID…")
+        self.search_entry.set_size_request(280, -1)
+        self.search_entry.connect("search-changed", self._on_search_changed)
+        header.set_title_widget(self.search_entry)
+
+        # Right controls: FPS, Audio, Stop
+        self.fps_dropdown = Gtk.DropDown.new_from_strings(["30 FPS", "60 FPS", "120 FPS"])
+        fps_val = int(self.state.get("fps", 60))
+        self.fps_dropdown.set_selected(0 if fps_val <= 30 else (2 if fps_val >= 120 else 1))
+        self.fps_dropdown.connect("notify::selected", self._on_fps_changed)
+        header.pack_end(self.fps_dropdown)
+
+        self.audio_toggle = Gtk.ToggleButton(label="声音")
+        self.audio_toggle.set_active(bool(self.state.get("audio", False)))
+        self.audio_toggle.connect("toggled", self._on_audio_toggled)
+        header.pack_end(self.audio_toggle)
+
+        stop_btn = Gtk.Button(label="退回普通壁纸")
+        stop_btn.connect("clicked", self._on_stop_clicked)
+        header.pack_start(stop_btn)
+
+        # Filter bar
+        filter_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        filter_bar.set_margin_start(16)
+        filter_bar.set_margin_end(16)
+        filter_bar.set_margin_top(10)
+        filter_bar.set_margin_bottom(6)
+        root_box.append(filter_bar)
+
+        self.filter_buttons: dict[str, Gtk.ToggleButton] = {}
+        first_btn = None
+        for key, label in [("all", "全部"), ("scene", "Scene 场景"), ("video", "Video 视频"), ("web", "Web 网页")]:
+            btn = Gtk.ToggleButton(label=label)
+            btn.add_css_class("filter-btn")
+            if first_btn is None:
+                first_btn = btn
+                btn.set_active(True)
+            else:
+                btn.set_group(first_btn)
+            btn.connect("toggled", self._on_filter_toggled, key)
+            filter_bar.append(btn)
+            self.filter_buttons[key] = btn
+
+        self.count_label = Gtk.Label(label="")
+        self.count_label.add_css_class("wp-meta")
+        self.count_label.set_hexpand(True)
+        self.count_label.set_xalign(1.0)
+        filter_bar.append(self.count_label)
+
+        # Scrollable FlowBox grid
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        scrolled.set_hexpand(True)
+        root_box.append(scrolled)
+
+        self.flowbox = Gtk.FlowBox()
+        self.flowbox.set_valign(Gtk.Align.START)
+        self.flowbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.flowbox.set_homogeneous(True)
+        self.flowbox.set_row_spacing(12)
+        self.flowbox.set_column_spacing(12)
+        self.flowbox.set_margin_start(16)
+        self.flowbox.set_margin_end(16)
+        self.flowbox.set_margin_top(8)
+        self.flowbox.set_margin_bottom(16)
+        self.flowbox.set_min_children_per_line(2)
+        self.flowbox.set_max_children_per_line(6)
+        scrolled.set_child(self.flowbox)
+
+        self.items = scan_wallpapers()
+        self._populate_cards()
+        self._apply_filters()
+
+        self.connect("close-request", self._on_close)
+
+    def _on_close(self, _win):
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        return False
+
+    def _populate_cards(self):
+        for item in self.items:
+            card = WallpaperCard(item, self._apply_wallpaper)
+            card.set_active(item["id"] == self.active_id)
+            self.flowbox.append(card)
+            child = card.get_parent()
+            self.cards_by_id[item["id"]] = card
+            self.children_cards.append((child, card))
+            if item["preview"]:
+                self.executor.submit(self._load_thumb, item["id"], item["preview"])
+
+    def _load_thumb(self, wid: str, path: str):
+        try:
+            pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, THUMB_W * 2, THUMB_H * 2, True)
+            texture = Gdk.Texture.new_for_pixbuf(pb)
+            GLib.idle_add(self._set_card_texture, wid, texture)
+        except Exception:
+            pass
+
+    def _set_card_texture(self, wid: str, texture: Gdk.Texture):
+        card = self.cards_by_id.get(wid)
+        if card is not None:
+            card.set_texture(texture)
+        return False
+
+    def _on_search_changed(self, entry):
+        self.search_query = entry.get_text().strip().lower()
+        self._apply_filters()
+
+    def _on_filter_toggled(self, btn, key: str):
+        if btn.get_active():
+            self.filter_type = key
+            self._apply_filters()
+
+    def _current_fps(self) -> int:
+        idx = self.fps_dropdown.get_selected()
+        return [30, 60, 120][idx] if idx in (0, 1, 2) else 60
+
+    def _on_fps_changed(self, *_args):
+        self.state["fps"] = self._current_fps()
+        save_state(self.state)
+
+    def _on_audio_toggled(self, btn):
+        self.state["audio"] = bool(btn.get_active())
+        save_state(self.state)
+
+    def _apply_filters(self):
+        visible = 0
+        for child, card in self.children_cards:
+            item = card.item
+            ok_type = self.filter_type == "all" or item["type"] == self.filter_type
+            ok_search = not self.search_query or (self.search_query in item["search_key"])
+            show = ok_type and ok_search
+            child.set_visible(show)
+            if show:
+                visible += 1
+        self.count_label.set_text(f"显示 {visible} / {len(self.items)} 个壁纸")
+
+    def _show_toast(self, message: str):
+        toast = Adw.Toast.new(message)
+        toast.set_timeout(2)
+        self.toast_overlay.add_toast(toast)
+
+    def _apply_wallpaper(self, item: dict):
+        wid = item["id"]
+        fps = self._current_fps()
+        audio = self.audio_toggle.get_active()
+        cmd = [WE_WALL_BIN, wid, "--fps", str(fps)]
+        if audio:
+            cmd.append("--audio")
+
+        self._show_toast(f"正在应用：{item['title']}…")
+
+        def worker():
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            GLib.idle_add(self._on_apply_done, item, p.returncode == 0, p.stderr or p.stdout)
+
+        self.executor.submit(worker)
+
+    def _on_apply_done(self, item: dict, ok: bool, msg: str):
+        if ok:
+            if self.active_id in self.cards_by_id:
+                self.cards_by_id[self.active_id].set_active(False)
+            self.active_id = item["id"]
+            if self.active_id in self.cards_by_id:
+                self.cards_by_id[self.active_id].set_active(True)
+            self.state["active_id"] = self.active_id
+            self.state["fps"] = self._current_fps()
+            self.state["audio"] = self.audio_toggle.get_active()
+            save_state(self.state)
+            self._show_toast(f"已应用：{item['title']}")
+        else:
+            self._show_toast(f"启动失败：{msg.strip()[:80]}")
+        return False
+
+    def _on_stop_clicked(self, _btn):
+        subprocess.Popen([WE_WALL_BIN, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if self.active_id in self.cards_by_id:
+            self.cards_by_id[self.active_id].set_active(False)
+        self.active_id = ""
+        self.state["active_id"] = ""
+        save_state(self.state)
+        self._show_toast("已停止 Wallpaper Engine，恢复普通壁纸")
+
+
+class WeWallApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="local.ezioeen.WeWallGallery", flags=Gio.ApplicationFlags.FLAGS_NONE)
+
+    def do_activate(self):
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        provider = Gtk.CssProvider()
+        provider.load_from_string(CSS)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        win = self.props.active_window
+        if not win:
+            win = WeWallWindow(self)
+        win.present()
+
+
+if __name__ == "__main__":
+    app = WeWallApp()
+    sys.exit(app.run(sys.argv))

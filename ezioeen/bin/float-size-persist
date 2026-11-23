@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""记住微信子窗口/钉钉浮动窗口大小；已登录微信主窗口默认固定 1265x923，且自动排除 280x380 登录框。"""
+import glob, json, os, re, select, socket, subprocess, time
+
+STATE = os.path.expanduser("~/.local/state/float-sizes.json")
+PIDFILE = "/tmp/float-size-persist.pid"
+LOG = open("/tmp/fsp_debug.log", "a", buffering=1)
+
+# 已登录微信主窗口默认尺寸与位置（排除登录框）
+WECHAT_MAIN_DEFAULT = {"x": 250, "y": 159, "w": 1265, "h": 923}
+WECHAT_MAIN_KEYS = {"wechat|微信", "wechat|Weixin"}
+
+if os.path.exists(PIDFILE):
+    try:
+        os.kill(int(open(PIDFILE).read().strip()), 0)
+        raise SystemExit(0)
+    except Exception:
+        pass
+open(PIDFILE, "w").write(str(os.getpid()))
+
+sock_path = glob.glob(f"/run/user/{os.getuid()}/hypr/*/.socket2.sock")[0]
+sig = os.path.basename(os.path.dirname(sock_path))
+env = dict(os.environ, HYPRLAND_INSTANCE_SIGNATURE=sig)
+
+try:
+    raw = json.load(open(STATE))
+except Exception:
+    raw = {}
+
+saved = {}
+for k, v in raw.items():
+    if "|" in k and k not in WECHAT_MAIN_KEYS:
+        saved[k] = v
+    elif k == "dingtalk":
+        saved["com.alibabainc.dingtalk|com.alibabainc.dingtalk"] = v
+
+windows = {}
+last_poll = 0.0
+
+def norm(a):
+    return a[2:] if a.startswith("0x") else a
+
+def interesting(cls, title):
+    c = (cls or "").lower()
+    return ("wechat" in c or "weixin" in c or "dingtalk" in c)
+
+def key_for(cls, title):
+    return f"{cls}|{title}"
+
+def rx(s):
+    return re.escape(s)
+
+def clients():
+    try:
+        out = subprocess.run(["hyprctl", "clients", "-j"], env=env,
+                             capture_output=True, text=True, timeout=3).stdout
+        return json.loads(out)
+    except Exception:
+        return []
+
+def geom_of(c):
+    return {"x": c["at"][0], "y": c["at"][1], "w": c["size"][0], "h": c["size"][1]}
+
+def add_rule(key, g):
+    # 绝不能给 wechat|微信 注册全局 window_rule，否则会把 280x380 登录框也一起强制缩放！
+    if not key or "|" not in key or key in WECHAT_MAIN_KEYS:
+        return
+    cls, title = key.split("|", 1)
+    code = (f'hl.window_rule({{ match = {{ class = "^{rx(cls)}$", title = "^{rx(title)}$" }}, '
+            f'float = true, size = {{{g["w"]}, {g["h"]}}}, move = {{{g["x"]}, {g["y"]}}} }})')
+    subprocess.run(["hyprctl", "eval", code], env=env,
+                   capture_output=True, text=True, timeout=3)
+
+def apply_wechat_main_if_logged_in(addr):
+    # 等首帧 Wayland surface 提交后检查真实尺寸：<=450 是登录框（不动），>450 是已登录主窗口
+    time.sleep(0.05)
+    for c in clients():
+        if norm(c.get("address", "")) == addr:
+            w, h = c["size"][0], c["size"][1]
+            if w > 450:
+                g = WECHAT_MAIN_DEFAULT
+                if (w, h) != (g["w"], g["h"]):
+                    code = (
+                        f'hl.dispatch(hl.dsp.window.resize({{ x = {g["w"]}, y = {g["h"]}, relative = false, window = "address:0x{addr}" }})); '
+                        f'hl.dispatch(hl.dsp.window.move({{ x = {g["x"]}, y = {g["y"]}, relative = false, window = "address:0x{addr}" }}))'
+                    )
+                    subprocess.run(["hyprctl", "eval", code], env=env,
+                                   capture_output=True, text=True, timeout=3)
+                    LOG.write(f"[{time.strftime('%T')}] applied main default to 0x{addr} (was {w}x{h})\n")
+            else:
+                LOG.write(f"[{time.strftime('%T')}] skipped login window 0x{addr} ({w}x{h})\n")
+            break
+
+def poll():
+    for c in clients():
+        a = norm(c.get("address", ""))
+        w = windows.get(a)
+        if not w:
+            continue
+        g = geom_of(c)
+        if w["geom"] != g:
+            w["geom"] = g
+            w["dirty"] = True
+
+def save(addr):
+    w = windows.pop(addr, None)
+    if not w or not w.get("dirty") or not w.get("geom"):
+        return
+    key = w["key"]
+    if key in WECHAT_MAIN_KEYS:
+        return
+    saved[key] = w["geom"]
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    json.dump(saved, open(STATE, "w"), indent=2)
+    add_rule(key, w["geom"])
+    LOG.write(f"[{time.strftime('%T')}] saved {key} {w['geom']}\n")
+
+for k, g in saved.items():
+    add_rule(k, g)
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sock_path)
+s.setblocking(False)
+
+while True:
+    r, _, _ = select.select([s], [], [], 0.2)
+    if r:
+        data = s.recv(65536)
+        if not data:
+            break
+        for line in data.decode(errors="ignore").splitlines():
+            if line.startswith("openwindow>>"):
+                parts = line.split(">>", 1)[1].split(",", 3)
+                if len(parts) < 4:
+                    continue
+                addr, _, cls, title = parts
+                addr = norm(addr)
+                if not interesting(cls, title):
+                    continue
+                key = key_for(cls, title)
+                LOG.write(f"[{time.strftime('%T')}] open {addr} {cls} {title!r}\n")
+                if key in WECHAT_MAIN_KEYS:
+                    apply_wechat_main_if_logged_in(addr)
+                else:
+                    windows[addr] = {"class": cls, "title": title,
+                                     "key": key, "geom": None, "dirty": False}
+            elif line.startswith(("movewindow>>", "resizewindow>>")):
+                addr = norm(line.split(">>", 1)[1].split(",")[0])
+                if addr in windows:
+                    windows[addr]["dirty"] = True
+            elif line.startswith("closewindow>>"):
+                addr = norm(line.split(">>", 1)[1].strip())
+                if addr in windows:
+                    save(addr)
+    now = time.time()
+    if now - last_poll > 0.6:
+        last_poll = now
+        poll()

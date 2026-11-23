@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -302,11 +303,30 @@ PanelWindow {
                 text: root.types[row.type]
                 font.pixelSize: 22
             }
-            Art {
+            Item {
                 anchors.fill: parent
                 visible: row.type === "image"
-                step: 3
-                url: root.cached[row.modelData.id] ? "file://" + root.cache + row.modelData.id : ""
+                layer.enabled: true
+                layer.effect: MultiEffect {
+                    maskEnabled: true
+                    maskSource: rowThumbMask
+                    maskThresholdMin: 0.5
+                    maskSpreadAtMin: 1
+                }
+                Image {
+                    anchors.fill: parent
+                    source: root.cached[row.modelData.id] ? "file://" + root.cache + row.modelData.id : ""
+                    sourceSize: Qt.size(96, 96)
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    smooth: true
+                }
+            }
+            Rectangle {
+                id: rowThumbMask
+                width: 48; height: 48; radius: 24
+                visible: false
+                layer.enabled: true
             }
         }
         // картинку — в кэш, когда строка впервые показалась: вся история разом — сотни МБ в tmpfs.
@@ -411,12 +431,12 @@ PanelWindow {
                 width: parent.width
                 height: parent.height - dims.height - parent.spacing
                 source: root.cached[root.cur?.id] ? "file://" + root.cache + root.cur.id : ""
-                sourceSize: Qt.size(width, height)
+                sourceSize: Qt.size(width * 2, height * 2)
                 fillMode: Image.PreserveAspectFit
                 horizontalAlignment: Image.AlignLeft
                 asynchronous: true
-                layer.enabled: true
-                layer.effect: Dm { step: 3 }
+                smooth: true
+                mipmap: true
             }
             Row {
                 id: dims

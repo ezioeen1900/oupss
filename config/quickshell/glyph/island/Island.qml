@@ -190,12 +190,13 @@ Scope {
                 anchors { left: true; right: true; top: true; bottom: true }
                 exclusionMode: ExclusionMode.Ignore
                 color: "transparent"
+                readonly property bool passThroughShelf: (root.panelMode === "tabs" && root.activeTab === 3) || shelfView.draggingOut
                 WlrLayershell.layer: WlrLayer.Top
-                WlrLayershell.keyboardFocus: scrScope.isOpen ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+                WlrLayershell.keyboardFocus: (scrScope.isOpen && !passThroughShelf) ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
                 WlrLayershell.namespace: "glyph-top-island"
 
-                // 精确输入遮罩：收起时仅胶囊可点；展开时全屏点击外部可关；向外拖文件时自动让出底层窗口以便落盘到微信/浏览器！
-                mask: Region { item: scrScope.isOpen && !shelfView.draggingOut ? fullHit : capHit }
+                // 精确输入遮罩：收起态与 SHELF 暂存架态仅拦截岛体本身，底层 WPS / 微信 / 浏览器 / 文件管理器可自由双向拖放！
+                mask: Region { item: scrScope.isOpen && !win.passThroughShelf ? fullHit : capHit }
 
                 Item {
                     id: fullHit
@@ -210,10 +211,10 @@ Scope {
                     height: Math.ceil((islandBox.y + islandBox.height) * Theme.s) + 6
                 }
 
-                // 点击岛外区域收起灵动岛（透明遮罩，不让全屏变暗黑闪）
+                // 点击岛外区域收起灵动岛（SHELF 暂存架态不遮挡底层窗口，方便连续拖入/拖出文件）
                 MouseArea {
                     anchors.fill: parent
-                    enabled: scrScope.isOpen && !shelfView.draggingOut
+                    enabled: scrScope.isOpen && !win.passThroughShelf
                     visible: enabled
                     onClicked: root.close()
                 }
@@ -664,7 +665,7 @@ Scope {
                                                 }
                                             }
                                             HoverHandler { id: tHov; cursorShape: Qt.PointingHandCursor }
-                                            TapHandler { onTapped: root.activeTab = tSlot.index }
+                                            TapHandler { onTapped: if (tSlot.cur) root.close(); else root.activeTab = tSlot.index }
                                         }
                                     }
                                 }

@@ -276,7 +276,6 @@ lst.insert(0, {"uri": dst.as_uri(), "filePath": fp, "name": dst.name, "ext": "PN
 data["list"] = lst
 sp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 `, tmp, ts]);
-                    Quickshell.execDetached(["notify-send", "-a", "glyph · shelf", "已暂存至灵动岛 Shelf", `shot-${ts}.png`]);
                 } else if (action === "ocr") {
                     const tmp = `${run}/glyph-ocr-${Date.now()}.png`;
                     if (!res.saveToFile(tmp)) return;

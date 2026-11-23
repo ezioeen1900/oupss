@@ -1,10 +1,13 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs
 import qs.components
 
-// Nothing OS 点阵风格双向拖拽文件暂存器 (SHELF)
+// Nothing OS 点阵风格双向拖拽文件暂存器 (SHELF)：
+// - 图片格式直接渲染圆角真彩高清缩略图，非图片显示文件图标
+// - 严格 RFC-3986 编码 URI + Copy/Move/Link 全动作协商，完美支持直接拖放进 WPS Office / 微信 / 浏览器 / 文件管理器
 Item {
     id: root
 
@@ -32,14 +35,26 @@ Item {
     readonly property var list: adapter.list ?? []
     readonly property int count: list.length
 
+    readonly property var imageExts: ["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"]
+
+    function isImageItem(it) {
+        const ext = String(it?.ext || String(it?.filePath || "").split(".").pop() || "").toLowerCase();
+        return imageExts.includes(ext);
+    }
+
+    function toFileUri(fp) {
+        const clean = String(fp || "").replace(/\/+$/, "") || "/";
+        return "file://" + clean.split("/").map(encodeURIComponent).join("/");
+    }
+
     function iconForPath(p) {
         const ext = p.split(".").pop().toLowerCase();
-        if (["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"].includes(ext)) return "image-x-generic";
+        if (imageExts.includes(ext)) return "image-x-generic";
         if (["mp4", "mkv", "webm", "mov", "avi"].includes(ext)) return "video-x-generic";
         if (["mp3", "flac", "wav", "ogg", "m4a"].includes(ext)) return "audio-x-generic";
         if (["zip", "tar", "gz", "xz", "zst", "7z", "rar"].includes(ext)) return "package-x-generic";
         if (["pdf"].includes(ext)) return "application-pdf";
-        if (["doc", "docx", "odt", "xls", "xlsx", "ppt", "pptx"].includes(ext)) return "x-office-document";
+        if (["doc", "docx", "odt", "xls", "xlsx", "ppt", "pptx", "wps", "et", "dps"].includes(ext)) return "x-office-document";
         return "text-x-generic";
     }
 
@@ -58,13 +73,14 @@ Item {
 
         let next = (adapter.list ?? []).slice();
         for (const raw of incoming) {
-            let uri = raw;
             let filePath = raw;
             if (raw.startsWith("file://")) {
-                filePath = decodeURIComponent(raw.slice(7));
-            } else if (raw.startsWith("/")) {
-                uri = "file://" + encodeURI(raw);
-            } else {
+                try {
+                    filePath = decodeURIComponent(raw.slice(7));
+                } catch (_) {
+                    filePath = raw.slice(7);
+                }
+            } else if (!raw.startsWith("/")) {
                 continue;
             }
             filePath = filePath.replace(/\/+$/, "") || "/";
@@ -72,7 +88,7 @@ Item {
             const base = filePath.split("/").pop() || filePath;
             const hasExt = base.includes(".") && !base.startsWith(".");
             next.unshift({
-                uri: uri,
+                uri: toFileUri(filePath),
                 filePath: filePath,
                 name: base,
                 ext: hasExt ? base.split(".").pop().toUpperCase().slice(0, 5) : "FILE",
@@ -92,12 +108,25 @@ Item {
         adapter.list = [];
     }
 
+    function copyItem(it) {
+        const fp = String(it?.filePath || "");
+        if (!fp) return;
+        const u = toFileUri(fp);
+        if (isImageItem(it)) {
+            Quickshell.execDetached(["sh", "-c", 'wl-copy -t image/png < "$1"', "sh", fp]);
+        } else {
+            Quickshell.execDetached(["sh", "-c", 'printf "%s\\r\\n" "$1" | wl-copy -t text/uri-list', "sh", u]);
+        }
+    }
+
     function mimeFor(it) {
-        const u = String(it.uri);
+        const fp = String(it?.filePath || "");
+        const u = toFileUri(fp);
         return {
             "text/uri-list": u + "\r\n",
-            "text/plain": String(it.filePath),
-            "x-special/gnome-copied-files": "copy\n" + u + "\n"
+            "text/plain": fp,
+            "UTF8_STRING": fp,
+            "x-special/gnome-copied-files": "copy\n" + u
         };
     }
 
@@ -120,7 +149,7 @@ Item {
         anchors.fill: parent
         spacing: 12
 
-        // 顶部状态行
+        // 顶部状态行（右侧提供收起与清空按钮）
         Item {
             width: parent.width
             height: 20
@@ -147,7 +176,7 @@ Item {
             }
         }
 
-        // 空暂存架点阵虚线投递框
+        // 空暂存架点阵投递框
         Rectangle {
             visible: root.count === 0
             width: parent.width
@@ -172,7 +201,7 @@ Item {
                 }
                 Lb {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "drag cards out to wechat · browser · dolphin"
+                    text: "drag cards out to wps · wechat · browser · dolphin"
                     color: Theme.mute
                     px: 9
                 }
@@ -186,6 +215,7 @@ Item {
             width: parent.width
             height: 176
             orientation: ListView.Horizontal
+            interactive: root.count > 3
             spacing: 12
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -195,6 +225,8 @@ Item {
                 id: del
                 required property var modelData
                 required property int index
+                readonly property bool isImg: root.isImageItem(modelData)
+                readonly property string itemUri: root.toFileUri(modelData.filePath)
                 width: 142
                 height: 172
 
@@ -204,51 +236,134 @@ Item {
                     height: 172
                     radius: Theme.corner(22)
                     color: cardHov.hovered ? Theme.s3 : Theme.s2
-                    border { width: dragHandler.active ? 1 : 0; color: Theme.nothingRed }
-                    scale: dragHandler.active ? 1.04 : 1.0
+                    border { width: dragHandler.active ? 1.5 : 0; color: Theme.nothingRed }
+                    scale: dragHandler.active ? 1.03 : 1.0
                     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
                     Drag.dragType: Drag.Automatic
                     Drag.active: dragHandler.active
-                    Drag.supportedActions: Qt.CopyAction
+                    Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
                     Drag.proposedAction: Qt.CopyAction
-                    Drag.hotSpot: Qt.point(width / 2, height / 2)
+                    Drag.hotSpot: Qt.point(32, 32)
                     Drag.imageSource: fileIcon.source
                     Drag.mimeData: root.mimeFor(del.modelData)
+                    Drag.onDragStarted: root.draggingOut = true
+                    Drag.onDragFinished: dropAction => root.draggingOut = false
 
                     HoverHandler { id: cardHov; cursorShape: Qt.OpenHandCursor }
 
                     DragHandler {
                         id: dragHandler
                         target: null
-                        onActiveChanged: root.draggingOut = active
                     }
 
                     TapHandler {
                         onTapped: Quickshell.execDetached(["xdg-open", String(del.modelData.filePath)])
                     }
 
-                    // 右上角移除按钮
-                    Rectangle {
+                    // 右上角快捷操作组（复制 + 移除）
+                    Row {
                         z: 4
                         anchors { right: parent.right; top: parent.top; rightMargin: 8; topMargin: 8 }
-                        width: 24
-                        height: 24
-                        radius: 12
-                        color: rmHov.hovered ? Theme.nothingRed : Theme.s1
+                        spacing: 4
                         opacity: cardHov.hovered ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
-                        Icon {
-                            anchors.centerIn: parent
-                            text: "\u{F0156}"
-                            font.pixelSize: 13
-                            color: Theme.fg
+
+                        Rectangle {
+                            width: 24; height: 24; radius: 12
+                            color: cpArea.containsMouse ? Theme.fg : Qt.rgba(0.06, 0.06, 0.06, 0.85)
+                            Icon {
+                                anchors.centerIn: parent
+                                text: "\u{F018F}"
+                                font.pixelSize: 12
+                                color: cpArea.containsMouse ? Theme.ink : Theme.fg
+                            }
+                            MouseArea {
+                                id: cpArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.copyItem(del.modelData)
+                            }
                         }
-                        HoverHandler { id: rmHov; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: root.removeAt(del.index) }
+
+                        Rectangle {
+                            width: 24; height: 24; radius: 12
+                            color: rmArea.containsMouse ? Theme.nothingRed : Qt.rgba(0.06, 0.06, 0.06, 0.85)
+                            Icon {
+                                anchors.centerIn: parent
+                                text: "\u{F0156}"
+                                font.pixelSize: 13
+                                color: "#FFFFFF"
+                            }
+                            MouseArea {
+                                id: rmArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.removeAt(del.index)
+                            }
+                        }
                     }
 
+                    // 图片卡片：顶部高清真彩圆角缩略图 + 底部文件名与标签
                     Column {
+                        visible: del.isImg
+                        anchors { fill: parent; margins: 10 }
+                        spacing: 7
+
+                        Item {
+                            width: parent.width
+                            height: 104
+                            layer.enabled: true
+                            layer.effect: MultiEffect {
+                                maskEnabled: true
+                                maskSource: imgThumbMask
+                                maskThresholdMin: 0.5
+                                maskSpreadAtMin: 1
+                            }
+                            Rectangle { anchors.fill: parent; color: Theme.s1 }
+                            Image {
+                                anchors.fill: parent
+                                source: del.isImg ? del.itemUri : ""
+                                sourceSize: Qt.size(244, 208)
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                smooth: true
+                            }
+                        }
+
+                        Rectangle {
+                            id: imgThumbMask
+                            width: 122
+                            height: 104
+                            radius: Theme.corner(14)
+                            visible: false
+                            layer.enabled: true
+                        }
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideMiddle
+                            maximumLineCount: 1
+                            textFormat: Text.PlainText
+                            text: del.modelData.name
+                            font { family: Theme.ui; pixelSize: 11; weight: Font.Medium }
+                            color: Theme.fg
+                        }
+
+                        Lb {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: del.modelData.ext || "IMG"
+                            px: 9
+                            color: Theme.mute
+                        }
+                    }
+
+                    // 普通文件卡片：圆形图标 + 文件名与后缀
+                    Column {
+                        visible: !del.isImg
                         anchors.centerIn: parent
                         width: parent.width - 24
                         spacing: 10

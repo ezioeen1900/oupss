@@ -159,9 +159,9 @@ rebind("ALT + SHIFT + P",  hl.dsp.global("shell:power"))
 rebind("ALT + SHIFT + C",  hl.dsp.exec_cmd(HOME .. "/.local/bin/clash-ui"))
 rebind("ALT + SHIFT + D",  hl.dsp.exec_cmd(HOME .. "/.local/bin/dolphin " .. HOME .. "/Pictures/Screenshots"))
 rebind("ALT + SHIFT + R",  fn.record(true, false), { locked = true })
-rebind("ALT + SHIFT + S",  hl.dsp.exec_cmd("flameshot gui"))
-rebind("CTRL + SHIFT + S", hl.dsp.exec_cmd("flameshot gui"))
-rebind("mouse:274",        hl.dsp.exec_cmd("flameshot gui"))
+rebind("ALT + SHIFT + S",  hl.dsp.global("shell:shot"))
+rebind("CTRL + SHIFT + S", hl.dsp.global("shell:shot"))
+rebind("mouse:274",        hl.dsp.global("shell:shot"))
 rebind("ALT + C",          hl.dsp.exec_cmd(HOME .. "/.local/bin/copy-image-data"))
 
 -- ==================== 个人窗口规则 ====================

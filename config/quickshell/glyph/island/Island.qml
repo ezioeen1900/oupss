@@ -616,6 +616,11 @@ Scope {
                                 }
 
                                 readonly property real slotW: width / root.tabs.length
+                                property real tabPos: root.activeTab
+                                Behavior on tabPos {
+                                    enabled: scrScope.isOpen && root.panelMode === "tabs"
+                                    NumberAnimation { duration: 260; easing.type: Easing.OutQuint }
+                                }
 
                                 Row {
                                     anchors.fill: parent
@@ -656,15 +661,14 @@ Scope {
                                     }
                                 }
 
-                                // Nothing 红色滑动下划线指示条
+                                // Nothing 红色滑动下划线指示条（绑定归一化 tabPos，避免岛宽伸缩时每帧打断重启 Behavior）
                                 Rectangle {
                                     width: 34
                                     height: 2.5
                                     radius: 1.25
                                     anchors.bottom: parent.bottom
-                                    x: root.activeTab * tabBar.slotW + (tabBar.slotW - width) / 2
+                                    x: tabBar.tabPos * tabBar.slotW + (tabBar.slotW - width) / 2
                                     color: Theme.nothingRed
-                                    Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutQuint } }
                                 }
 
                                 Rectangle {

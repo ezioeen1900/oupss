@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Bluetooth
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.UPower
@@ -7,6 +8,7 @@ import Quickshell.Wayland
 import qs
 import qs.components
 import qs.services
+import qs.settings
 
 // Nothing OS 点阵灵动岛顶栏：
 // - 收起态：居中纯黑胶囊，滚轮/横滑在「时间+电源」与「实时歌词」两态间切换；左键展开面板，右键呼出 Glyph 控制中心；拖入文件自动张开暂存器
@@ -145,13 +147,114 @@ Scope {
 
     function goWs(ws) { Hyprland.dispatch(`hl.dsp.focus({ workspace = "${ws}" })`); }
 
-    // 充电与播放呼吸节拍（20fps 轻量驱动）
+    // 充电、录屏与播放呼吸节拍（20fps 轻量驱动）
     property real beatPhase: 0
     Timer {
-        running: root.bat.state === UPowerDeviceState.Charging || (root.capsuleMode === 1 && LyricsFeed.playing)
+        running: root.bat.state === UPowerDeviceState.Charging || Sys.rec || (root.capsuleMode === 1 && LyricsFeed.playing)
         interval: 60
         repeat: true
         onTriggered: root.beatPhase = (root.beatPhase + 0.12) % (Math.PI * 2)
+    }
+
+    // ==================== 实时活动感知（Live Activities：录屏计时 / 专注常驻 / 蓝牙·切歌·电源微弹） ====================
+    property int recSec: 0
+    Timer {
+        running: Sys.rec
+        interval: 1000
+        repeat: true
+        onTriggered: root.recSec++
+    }
+    Connections {
+        target: Sys
+        function onRecChanged() { if (!Sys.rec) root.recSec = 0; }
+    }
+    function fmtMmSs(s) {
+        const m = Math.floor(s / 60), r = s % 60;
+        return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+    }
+
+    property bool toastReady: false
+    property var liveToast: null // { icon, art, tag, title, sub, accent }
+    property var knownBtMap: ({})
+
+    Timer {
+        running: true
+        interval: 2500
+        onTriggered: {
+            const init = {};
+            for (const d of Bluetooth.devices.values) {
+                if (d.connected) init[d.address] = d.name || d.deviceName || "Bluetooth";
+            }
+            root.knownBtMap = init;
+            root.toastReady = true;
+        }
+    }
+
+    Timer {
+        id: liveToastTimer
+        interval: 2800
+        onTriggered: root.liveToast = null
+    }
+
+    function pushLiveToast(obj) {
+        if (!toastReady) return;
+        liveToast = obj;
+        liveToastTimer.restart();
+    }
+
+    // 1) 蓝牙耳机/外设连接与断开微弹
+    readonly property string btConnectedSig: Bluetooth.devices.values.filter(d => d.connected).map(d => d.address).sort().join(",")
+    onBtConnectedSigChanged: {
+        if (!toastReady) return;
+        const cur = {};
+        for (const d of Bluetooth.devices.values) {
+            if (d.connected) {
+                const nm = d.name || d.deviceName || "Bluetooth";
+                cur[d.address] = nm;
+                if (!knownBtMap[d.address]) {
+                    const pct = (d.batteryAvailable && d.battery > 0) ? `${Math.round(d.battery * 100)}%` : "READY";
+                    pushLiveToast({ icon: "\u{F00AF}", art: "", tag: pct, title: nm, sub: "", accent: true });
+                }
+            }
+        }
+        for (const addr in knownBtMap) {
+            if (!cur[addr]) {
+                pushLiveToast({ icon: "\u{F00B2}", art: "", tag: "OFF", title: knownBtMap[addr], sub: "", accent: false });
+            }
+        }
+        knownBtMap = cur;
+    }
+
+    // 2) 切歌瞬态微弹（时钟模式下感知新曲目）
+    Connections {
+        target: Media
+        function onTrackChanged() {
+            if (!root.toastReady || !Media.playing || root.capsuleMode === 1) return;
+            const title = Media.player?.trackTitle ?? "";
+            if (!title) return;
+            root.pushLiveToast({
+                icon: "\u{F0387}",
+                art: Media.player?.trackArtUrl ?? "",
+                tag: "PLAYING",
+                title: title,
+                sub: Media.player?.trackArtist ?? "",
+                accent: true
+            });
+        }
+    }
+
+    // 3) 插拔充电器刷新率与性能档切换微弹
+    Connections {
+        target: UPower
+        function onOnBatteryChanged() {
+            if (!root.toastReady) return;
+            const pct = `${Math.round(root.bat.percentage * 100)}%`;
+            if (UPower.onBattery) {
+                root.pushLiveToast({ icon: "\u{F007E}", art: "", tag: pct, title: "Battery · 60Hz ECO", sub: "", accent: false });
+            } else {
+                root.pushLiveToast({ icon: "\u{F140B}", art: "", tag: pct, title: "AC Power · 120Hz", sub: "", accent: true });
+            }
+        }
     }
 
     // 检测浮动式截图选区窗口（如鼠标中键 Flameshot GUI），在其打开期间让出顶层，避免遮挡截图选区与标注栏
@@ -222,11 +325,16 @@ Scope {
                 Stage {
                     id: stage
 
-                    // 测算歌词胶囊自适应宽度
+                    // 测算歌词与实时活动胶囊自适应宽度
                     TextMetrics {
                         id: lyricMetrics
                         font { family: Theme.ui; pixelSize: 13; weight: Font.Medium }
                         text: LyricsFeed.displayText
+                    }
+                    TextMetrics {
+                        id: toastMetrics
+                        font { family: Theme.ui; pixelSize: 13; weight: Font.DemiBold }
+                        text: root.liveToast ? (root.liveToast.title + (root.liveToast.sub ? " · " + root.liveToast.sub : "")) : ""
                     }
 
                     Item {
@@ -236,9 +344,13 @@ Scope {
                         property real dockP: scrScope.isOpen ? 1 : 0
                         Behavior on dockP { NumberAnimation { duration: 260; easing.type: Easing.OutQuint } }
 
-                        readonly property real restW: root.capsuleMode === 1
-                            ? Math.max(250, Math.min(560, lyricMetrics.width + 138))
-                            : Math.max(264, timeCapsuleRow.implicitWidth + 36)
+                        readonly property real restW: {
+                            if (root.liveToast !== null)
+                                return Math.max(280, Math.min(520, toastMetrics.width + 150));
+                            if (root.capsuleMode === 1)
+                                return Math.max(250, Math.min(560, lyricMetrics.width + 138));
+                            return Math.max(264, timeCapsuleRow.implicitWidth + 36);
+                        }
 
                         readonly property string shownMode: scrScope.isOpen ? root.panelMode : root.lastMode
                         readonly property real openW: shownMode === "quick" ? 470 : (root.activeTab === 3 ? 620 : 480)
@@ -380,16 +492,16 @@ Scope {
                                 }
                             }
 
-                            // 态 0：中间工作区点阵 + Doto 时间 + 电池电源信息
+                            // 态 0：中间工作区点阵 + Doto 时间 + 专注/录屏实时活动徽章 + 电池电源信息
                             Row {
                                 id: timeCapsuleRow
                                 anchors.centerIn: parent
-                                spacing: 14
-                                opacity: root.capsuleMode === 0 ? 1 : 0
+                                spacing: 12
+                                opacity: root.liveToast === null && root.capsuleMode === 0 ? 1 : 0
                                 visible: opacity > 0.01
                                 Behavior on opacity { NumberAnimation { duration: 150 } }
 
-                                // 工作区点阵（点击小点直接切工作区）
+                                // 工作区点阵
                                 Row {
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: 5
@@ -411,12 +523,12 @@ Scope {
 
                                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 3; height: 3; radius: 1.5; color: Theme.s3 }
 
-                                // 点阵时间 + 专注/录屏红点
+                                // 点阵时间 + 麦克风活跃红点
                                 Row {
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: 6
                                     Rectangle {
-                                        visible: Focus.running || Sys.live
+                                        visible: !Sys.rec && !Focus.running && Sys.live
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 6.5
                                         height: 6.5
@@ -427,6 +539,71 @@ Scope {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: `${Theme.hh(clock.date)}:${Qt.formatTime(clock.date, "mm")}`
                                         font.pixelSize: 20
+                                    }
+                                }
+
+                                // 常驻实时活动 A：录屏中红色胶囊（单击直接停止并保存录屏！）
+                                Rectangle {
+                                    visible: Sys.rec
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: recCapsuleRow.width + 14
+                                    height: 20
+                                    radius: 10
+                                    color: Qt.rgba(0.84, 0.10, 0.13, 0.22)
+                                    border { width: 1; color: Theme.nothingRed }
+                                    Row {
+                                        id: recCapsuleRow
+                                        anchors.centerIn: parent
+                                        spacing: 5
+                                        Rectangle {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 6; height: 6; radius: 3
+                                            color: Theme.nothingRed
+                                            opacity: 0.45 + 0.55 * Math.abs(Math.cos(root.beatPhase))
+                                        }
+                                        Lb {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: `REC ${root.fmtMmSs(root.recSec)}`
+                                            px: 9
+                                            color: "#FFFFFF"
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: Sys.toggleRec()
+                                    }
+                                }
+
+                                // 常驻实时活动 B：番茄专注倒计时徽章（单击直达 FOCUS 页）
+                                Rectangle {
+                                    visible: Focus.running || Focus.paused
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: focCapsuleRow.width + 14
+                                    height: 20
+                                    radius: 10
+                                    color: Theme.s2
+                                    border { width: 1; color: Focus.running ? Theme.nothingRed : Theme.s3 }
+                                    Row {
+                                        id: focCapsuleRow
+                                        anchors.centerIn: parent
+                                        spacing: 5
+                                        Rectangle {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 5.5; height: 5.5; radius: 2.75
+                                            color: Focus.running ? Theme.nothingRed : Theme.grey
+                                        }
+                                        Lb {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: Focus.mmss(Focus.left)
+                                            px: 9
+                                            color: Theme.fg
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.toggleTab(1)
                                     }
                                 }
 
@@ -486,7 +663,7 @@ Scope {
                                 anchors.fill: parent
                                 anchors.leftMargin: 14
                                 anchors.rightMargin: 14
-                                opacity: root.capsuleMode === 1 ? 1 : 0
+                                opacity: root.liveToast === null && root.capsuleMode === 1 ? 1 : 0
                                 visible: opacity > 0.01
                                 Behavior on opacity { NumberAnimation { duration: 150 } }
 
@@ -561,6 +738,65 @@ Scope {
                                     text: `${Theme.hh(clock.date)}:${Qt.formatTime(clock.date, "mm")}`
                                     px: 10
                                     color: Theme.grey
+                                }
+                            }
+
+                            // 态 2：瞬态实时活动胶囊微弹（蓝牙连接/切歌/电源刷新率切换 2.8s 自动收起）
+                            Item {
+                                anchors.fill: parent
+                                anchors.leftMargin: 14
+                                anchors.rightMargin: 14
+                                opacity: root.liveToast !== null ? 1 : 0
+                                visible: opacity > 0.01
+                                Behavior on opacity { NumberAnimation { duration: 160 } }
+
+                                Row {
+                                    id: toastLeft
+                                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                    spacing: 8
+
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 20; height: 20; radius: 10
+                                        color: root.liveToast?.accent ? Theme.nothingRed : Theme.s2
+                                        clip: true
+                                        Art {
+                                            visible: (root.liveToast?.art ?? "") !== ""
+                                            anchors.fill: parent
+                                            step: 2
+                                            url: root.liveToast?.art ?? ""
+                                        }
+                                        Icon {
+                                            visible: (root.liveToast?.art ?? "") === ""
+                                            anchors.centerIn: parent
+                                            text: root.liveToast?.icon ?? "\u{F009A}"
+                                            font.pixelSize: 12
+                                            color: "#FFFFFF"
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    anchors {
+                                        left: toastLeft.right
+                                        leftMargin: 9
+                                        right: toastTag.left
+                                        rightMargin: 9
+                                        verticalCenter: parent.verticalCenter
+                                    }
+                                    elide: Text.ElideRight
+                                    textFormat: Text.PlainText
+                                    text: root.liveToast ? (root.liveToast.title + (root.liveToast.sub ? " · " + root.liveToast.sub : "")) : ""
+                                    font { family: Theme.ui; pixelSize: 13; weight: Font.DemiBold }
+                                    color: Theme.fg
+                                }
+
+                                Lb {
+                                    id: toastTag
+                                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                                    text: root.liveToast?.tag ?? ""
+                                    px: 9
+                                    color: root.liveToast?.accent ? Theme.nothingRed : Theme.grey
                                 }
                             }
                         }

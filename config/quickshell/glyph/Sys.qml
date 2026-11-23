@@ -148,10 +148,11 @@ Singleton {
     // адаптеру нужно время после включения
     Timer { id: btResumeT; interval: 1500; onTriggered: { for (const d of Bluetooth.devices.values) if (root.btResume.includes(d.address) && !d.connected) d.connect(); } }
 
-    // ---- кофеин: не спать. Ингибитору нужно живое окно — невидимое 0×0, как в demonshot ----
+    // ---- кофеин: не спать（手动开启或存在 Alt+F 独占全屏窗口时自动阻止息屏/锁屏/睡眠） ----
     property bool caffeine: false
+    readonly property bool fullscreenActive: ToplevelManager.toplevels.values.some(tl => tl.fullscreen)
     IdleInhibitor {
-        enabled: root.caffeine
+        enabled: root.caffeine || root.fullscreenActive
         window: PanelWindow {
             implicitWidth: 0
             implicitHeight: 0

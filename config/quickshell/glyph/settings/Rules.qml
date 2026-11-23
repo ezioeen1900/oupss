@@ -75,11 +75,16 @@ Singleton {
             property int scroll: 30       // % — scroll_factor 0.3
             property int sens: 0          // -100…100 → sensitivity -1…1
             property bool flat: false
-            // Idle: минуты, 0 — никогда
-            property int lockAfter: 3
-            property int dpmsAfter: 5
-            property int sleepAfter: 10
-            property bool hibernate: true // suspend-then-hibernate
+            // Idle: минуты, 0 — никогда（默认：插电 30m 关屏 / 60m 锁屏；电池 30m 关屏锁屏 / 60m 睡眠）
+            property int lockAfter: 60
+            property int dpmsAfter: 30
+            property int sleepAfter: 0
+            property int batLockAfter: 30
+            property int batDpmsAfter: 30
+            property int batSleepAfter: 60
+            property bool hibernate: false
+            property bool autoPower: true
+            property int lastAcMode: 3
             // System
             property bool roman: true
             // Notices. Тишина (её же ставят обереги): обычные уведомления не показываются, критические — всегда
@@ -270,13 +275,18 @@ Singleton {
     // в первые ~0.5 с жизни лока, роняет qs (#5)
     function idle() {
         idleDone = true;
-        const s = store, dpms = a => `hyprctl dispatch 'hl.dsp.dpms({action = "${a}"})'`;
+        const s = store, onBat = UPower.onBattery;
+        const lockMin = onBat ? s.batLockAfter : s.lockAfter;
+        const dpmsMin = onBat ? s.batDpmsAfter : s.dpmsAfter;
+        const sleepMin = onBat ? s.batSleepAfter : s.sleepAfter;
+        const dpms = a => `hyprctl dispatch 'hl.dsp.dpms({action = "${a}"})'`;
         const at = (min, on, back) => min ? `\nlistener {\n    timeout = ${min * 60}\n    on-timeout = ${on}${back ? `\n    on-resume = ${back}` : ""}\n}\n` : "";
         const conf = "# demonshot: written by Rules.idle() from rules.json, do not edit by hand\n"
             + "general {\n    lock_cmd = ~/.config/quickshell/rice/rice lock\n    inhibit_sleep = 3\n"
             + `    before_sleep_cmd = loginctl lock-session\n    after_sleep_cmd = ${dpms("on")}\n}\n`
-            + at(s.lockAfter, "loginctl lock-session") + at(s.dpmsAfter, dpms("off"), dpms("on"))
-            + at(s.sleepAfter, hibernateOn ? "systemctl suspend-then-hibernate" : "systemctl suspend");
+            + at(dpmsMin, dpms("off"), dpms("on"))
+            + at(lockMin, "loginctl lock-session")
+            + at(sleepMin, hibernateOn ? "systemctl suspend-then-hibernate" : "systemctl suspend");
         Quickshell.execDetached(["sh", "-c", 'f="$1/hypridle.conf"; printf %s "$2" | cmp -s - "$f" && pgrep -x hypridle >/dev/null && exit; '
                                        + 'printf %s "$2" > "$f"; pkill -x hypridle; exec hypridle -c "$f"', "sh", dir, conf]);
     }
@@ -320,6 +330,7 @@ Singleton {
         i = Math.max(0, Math.min(modeCount - 1, i));
         const hz0 = hz, moving0 = moving;
         store.ultra = i === 0;
+        if (!UPower.onBattery && i >= 1) store.lastAcMode = i;
         PowerProfiles.profile = i === 0 ? PowerProfile.PowerSaver : i - 1;
         // монитор — только встроенный и если герцы правда другие: перенастройка вывода мигает экраном и сбрасывает наведение
         // (панели гаснут)
@@ -329,8 +340,30 @@ Singleton {
         }
         if (moving !== moving0) motion();
     }
-    // что стоит на деле: ultra перекрывает настройки — самые низкие герцы экрана, иначе ближайшие к выбранным
-    readonly property int hz: store.ultra ? rates[0] : refreshHz
+    // 拔插电源自动联动：电池自动切 60Hz + ECO 省电 + 电池息屏策略；插电自动恢复 120Hz + 原性能档 + 插电息屏策略
+    Connections {
+        target: UPower
+        function onOnBatteryChanged() {
+            if (!root.driving) return;
+            if (store.autoPower) {
+                if (UPower.onBattery) {
+                    if (root.mode >= 2) store.lastAcMode = root.mode;
+                    PowerProfiles.profile = PowerProfile.PowerSaver;
+                } else {
+                    const restoreIdx = Math.max(2, Math.min(root.modeCount - 1, store.lastAcMode || 2));
+                    store.ultra = false;
+                    PowerProfiles.profile = restoreIdx - 1;
+                }
+                if (mon.name) {
+                    hypr(rule(mon));
+                    monReread.restart();
+                }
+            }
+            root.idle();
+        }
+    }
+    // что стоит на деле: ultra 或电池自动节能时切最低刷新率（60Hz），插电跑最高刷新率（120Hz）
+    readonly property int hz: (store.ultra || (store.autoPower && UPower.onBattery)) ? rates[0] : refreshHz
     readonly property bool moving: store.motion && !store.ultra && !store.game
     readonly property bool blurOn: store.blur && !store.ultra && !store.game
     readonly property bool shadowOn: store.shadow && !store.ultra && !store.game

@@ -63,9 +63,14 @@ install_links_and_state() {
     bash "$REPO_DIR/install.sh" --links
 
     say "初始化 Ezioeen 默认主题与缩放状态..."
-    mkdir -p "$HOME/.local/state/rice" "$HOME/.config/demonshot"
+    mkdir -p "$HOME/.local/state/rice" "$HOME/.config/demonshot" "$HOME/.local/share/fcitx5/themes" "$HOME/.config/fcitx5/conf"
     [ -f "$HOME/.local/state/rice/glyph.json" ] || cp -a "$REPO_DIR/ezioeen/defaults/glyph.json" "$HOME/.local/state/rice/glyph.json"
     [ -f "$HOME/.config/demonshot/rules.json" ] || cp -a "$REPO_DIR/ezioeen/defaults/rules.json" "$HOME/.config/demonshot/rules.json"
+    if [ -d "$REPO_DIR/extras/fcitx5/glyph-nothing" ]; then
+        rm -rf "$HOME/.local/share/fcitx5/themes/glyph-nothing"
+        cp -rT "$REPO_DIR/extras/fcitx5/glyph-nothing" "$HOME/.local/share/fcitx5/themes/glyph-nothing"
+        cp -a "$REPO_DIR/ezioeen/defaults/classicui.conf" "$HOME/.config/fcitx5/conf/classicui.conf"
+    fi
     systemctl --user disable --now awww-daemon.service >/dev/null 2>&1 || true
 }
 

@@ -92,14 +92,18 @@ hl.window_rule({ match = { class = "^(ueberzugpp_.*)$" }, float = true, no_initi
 -- Autodesk Fusion 360
 hl.window_rule({ match = { class = "fusion360.exe", title = "Fusion360|(Marking Menu)" }, no_blur = true })
 
--- Ugh xwayland popups
+-- Ugh xwayland popups & Fcitx5 IME / WeChat auxiliary popups (彻底消除微信输入法候选词与弹窗残影、半透明叠影)
 hl.window_rule({ match = { xwayland = true, title = "win[0-9]+" }, tag = "+xwl_popup" })
 hl.window_rule({
     match = { xwayland = true, title = "", class = "", initial_title = "", initial_class = "" },
     tag   = "+xwl_popup",
 })
+hl.window_rule({ match = { class = "^(fcitx|fcitx5|org\\.fcitx\\..*)$" }, tag = "+xwl_popup" })
+hl.window_rule({ match = { title = "^(fcitx|Fcitx.*)$" }, tag = "+xwl_popup" })
+hl.window_rule({ match = { class = "^wechat$", title = "^$" }, tag = "+xwl_popup" })
 hl.window_rule({
     match     = { tag = "xwl_popup" },
+    no_anim   = true,
     no_dim    = true,
     no_shadow = true,
     no_blur   = true,
@@ -132,5 +136,6 @@ hl.layer_rule({ match = { namespace = "launcher" }, animation = "popin 80%", blu
 hl.layer_rule({ match = { namespace = "demonshot-.*" }, no_anim = true })
 -- glyph: полосы-OSD, остров, быстрые настройки и свои модули рисуют появление сами — компоновщик не мешает (и не тормозит OSD);
 -- меню питания своей анимации нет — мягкий fade
+hl.layer_rule({ match = { namespace = "input-method" }, no_anim = true, no_blur = true })
 hl.layer_rule({ match = { namespace = "glyph-power" }, animation = "fade" })
 hl.layer_rule({ match = { namespace = "glyph-(launcher|edge|island|top-island|overview|buds|quick|home|bar|caffeine|shot|pin|clip|charms|vpn|deck|prefs|hot|cal|wall|back|cava)" }, no_anim = true })

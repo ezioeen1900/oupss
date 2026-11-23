@@ -142,4 +142,7 @@ hl.bind("SUPER + R", hl.dsp.global("shell:memo"))
 
 <br>
 
-- Built upon the foundation of [**Glyph Rice**](https://github.com/Nebelung-cloud/glyph-rice) by [@Nebelung-cloud](https://github.com/Nebelung-cloud) (GPL-3.0), extended with the **Liquid Concave-Ear Dynamic Island**, **4-Tab Matrix Hub (`CALENDAR · FOCUS · NOTES · SHELF`)**, **12-Slot Live `ScreencopyView` Workspace & Scratchpad Overview**, **Empty-Desktop 80% Dot-Matrix Cava Visualizer**, and the **rEFInd + Plymouth + Ring-Unwind Boot/Shutdown Chain**.
+- **Glyph Rice** — Built upon the Nothing OS dot-matrix foundation of [**Nebelung-cloud/glyph-rice**](https://github.com/Nebelung-cloud/glyph-rice) by [@Nebelung-cloud](https://github.com/Nebelung-cloud) (GPL-3.0).  
+  基于 [@Nebelung-cloud](https://github.com/Nebelung-cloud) 的 [**glyph-rice**](https://github.com/Nebelung-cloud/glyph-rice) 点阵桌面底座深度重构与扩展。
+- **Tide-island** — Inspired by [**enhaoswen/Tide-island**](https://github.com/enhaoswen/Tide-island) by [@enhaoswen](https://github.com/enhaoswen) for the liquid concave-ear Dynamic Island interaction, live lyrics capsule, and Wayland drag-and-drop file shelf workflow.  
+  灵动岛贴顶液态内凹耳形态、实时歌词胶囊与双向文件暂存架（Shelf）交互灵感借鉴自 [@enhaoswen](https://github.com/enhaoswen) 的 [**Tide-island**](https://github.com/enhaoswen/Tide-island)。

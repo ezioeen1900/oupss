@@ -66,6 +66,7 @@ install_links_and_state() {
     mkdir -p "$HOME/.local/state/rice" "$HOME/.config/demonshot" "$HOME/.local/share/fcitx5/themes" "$HOME/.config/fcitx5/conf"
     [ -f "$HOME/.local/state/rice/glyph.json" ] || cp -a "$REPO_DIR/ezioeen/defaults/glyph.json" "$HOME/.local/state/rice/glyph.json"
     [ -f "$HOME/.config/demonshot/rules.json" ] || cp -a "$REPO_DIR/ezioeen/defaults/rules.json" "$HOME/.config/demonshot/rules.json"
+    [ -f "$HOME/.Xresources" ] || cp -a "$REPO_DIR/ezioeen/defaults/Xresources" "$HOME/.Xresources"
     if [ -d "$REPO_DIR/extras/fcitx5/glyph-nothing" ]; then
         rm -rf "$HOME/.local/share/fcitx5/themes/glyph-nothing"
         cp -rT "$REPO_DIR/extras/fcitx5/glyph-nothing" "$HOME/.local/share/fcitx5/themes/glyph-nothing"

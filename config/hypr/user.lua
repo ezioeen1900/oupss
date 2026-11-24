@@ -42,14 +42,18 @@ hl.config({
         inactive_opacity = 0.85,
         dim_inactive = false,
     },
-    -- 登录进桌面首帧背景设为纯黑，无缝衔接 Glyph
+    -- 登录进桌面首帧背景设为纯黑，无缝衔接 Glyph；开启 XWayland 原生零缩放消除 1.25x 下 WPS/微信模糊
     misc = {
         background_color = "rgb(000000)",
+    },
+    xwayland = {
+        force_zero_scaling = true,
     },
 })
 
 -- ==================== 个人后台守护进程 ====================
 hl.on("hyprland.start", function()
+    hl.exec_cmd("[ -f $HOME/.Xresources ] && xrdb -merge $HOME/.Xresources")
     hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1 &")
     hl.exec_cmd("fcitx5 -d --disable notificationitem")
     hl.exec_cmd("$HOME/.local/bin/float-size-persist &")
